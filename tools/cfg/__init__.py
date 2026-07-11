@@ -40,8 +40,10 @@ if __name__ == "__main__" and __package__ in (None, ""):
 CFG_DIR = Path(__file__).resolve().parent          # tools/cfg/
 PROJECT_ROOT = CFG_DIR.resolve().parent.parent    # 项目根目录
 DEFAULT_CFG_PATH = CFG_DIR / "default.yaml"
-WORKFLOW_CFG_PATH = CFG_DIR / "workflow.yaml"
+WORKFLOW_CFG_PATH = CFG_DIR / "workflow.yaml"      # 系统主工作流（完整 stage 定义）
 EXAMPLE_CFG_PATH = CFG_DIR / "workflow.example.yaml"
+PROJECT_CFG_PATH = CFG_DIR / "workflow_config.yaml"        # 项目级覆盖入口
+PROJECT_EXAMPLE_CFG_PATH = CFG_DIR / "workflow_config.yaml.example"  # 同上示例
 DEFAULT_LOG = Path("workflow.log")                 # 默认日志名（相对项目根）
 
 _PLACEHOLDER_RE = re.compile(r"\$\{([^}]+)\}")
@@ -169,6 +171,8 @@ __all__ = [
     "DEFAULT_CFG_PATH",
     "DEFAULT_LOG",
     "EXAMPLE_CFG_PATH",
+    "PROJECT_CFG_PATH",
+    "PROJECT_EXAMPLE_CFG_PATH",
     "PROJECT_ROOT",
     "WORKFLOW_CFG_PATH",
     "flatten_dict",

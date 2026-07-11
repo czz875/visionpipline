@@ -22,8 +22,8 @@
 | 项目根目录 | `d:\PycharmProjects\cjet-vision-pipeline` |
 | Python 解释器 | `.conda\python.exe`（项目自带的便携式 Python，不依赖系统 Python） |
 | 依赖安装 | `.conda\python.exe -m pip install -r requirements.txt` |
-| 工作流入口 | `.conda\python.exe tools\workflow.py --config workflow_config.yaml` |
-| 配置示例 | `workflow_config.yaml.example`（复制为 `workflow_config.yaml`） |
+| 工作流入口 | `.conda\python.exe tools\workflow.py --config tools\cfg\workflow_config.yaml` |
+| 配置示例 | `tools\cfg\workflow_config.yaml.example`（复制为 `tools\cfg\workflow_config.yaml`） |
 | 主要数据目录 | `datasets/`（raw / annotated / split_30 / split_70 / yolo 等） |
 | 训练产物 | `runs/train/`、`archive/` |
 
@@ -50,7 +50,9 @@ cjet-vision-pipeline/
 │   │   ├── __init__.py            #   load_config / resolve_config / substitute_variables
 │   │   ├── default.yaml           #   系统默认（paths / parameters / log_file）
 │   │   ├── workflow.yaml          #   完整工作流 stage 定义
-│   │   └── workflow.example.yaml  #   给用户看的完整示例
+│   │   ├── workflow.example.yaml  #   系统主工作流完整示例
+│   │   ├── workflow_config.yaml           #   项目级覆盖入口（默认入口）
+│   │   └── workflow_config.yaml.example   #   项目级覆盖示例
 │   ├── engine/                    # 各 stage 聚合入口（仿 ultralytics/engine）
 │   │   └── __init__.py            #   re-export 10 个 stage 子包
 │   ├── annotate/                  # 标注阶段
@@ -285,24 +287,32 @@ if __name__ == "__main__" and __package__ in (None, ""):
 
 ### 5.3 跑整个工作流
 
-工作流配置在 `tools/cfg/` 下：
+工作流配置全部在 `tools/cfg/` 下，结构：
+
 - `tools/cfg/default.yaml`：系统默认（paths / parameters / log_file）
-- `tools/cfg/workflow.yaml`：完整 stage 定义
-- `tools/cfg/workflow.example.yaml`：可复制的完整示例
-- 项目根 `workflow_config.yaml`：项目级覆盖入口（与上面叠加使用）
+- `tools/cfg/workflow.yaml`：系统主工作流（17 个 stage）
+- `tools/cfg/workflow.example.yaml`：系统主工作流完整示例
+- `tools/cfg/workflow_config.yaml`：项目级覆盖入口（**默认入口**）
+- `tools/cfg/workflow_config.yaml.example`：项目级覆盖示例
+
+`tools/workflow.py` 默认从 `tools/cfg/workflow_config.yaml` 加载，自动
+叠加 `default.yaml` + `workflow.yaml` + `workflow_config.yaml` 三层。
 
 ```bash
 # 预览整条链路（不真跑）
-.conda\python.exe tools\workflow.py --config workflow_config.yaml --dry-run
+.conda\python.exe tools\workflow.py --dry-run
 
 # 跑第零段（接续段：备份 + autolabel 接续 + JSON 修复 + 重命名）
-.conda\python.exe tools\workflow.py --config workflow_config.yaml --from-stage backup_snapshot --to-stage rename_with_labelme_sync
+.conda\python.exe tools\workflow.py --from-stage backup_snapshot --to-stage rename_with_labelme_sync
 
 # 跑第一段（准备段：到人工清洗检查点停）
-.conda\python.exe tools\workflow.py --config workflow_config.yaml --from-stage auto_annotate
+.conda\python.exe tools\workflow.py --from-stage auto_annotate
 
 # 跑第二段（训练段：人工清洗完后再跑）
-.conda\python.exe tools\workflow.py --config workflow_config.yaml --from-stage select_subset
+.conda\python.exe tools\workflow.py --from-stage select_subset
+
+# 显式指定其它入口（如直接跑系统主工作流，跳过项目覆盖）
+.conda\python.exe tools\workflow.py --config tools\cfg\workflow.yaml --dry-run
 ```
 
 ### 5.4 测试

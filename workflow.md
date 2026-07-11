@@ -120,13 +120,13 @@ SAM / YOLO 自动标注 ──► LabelMe JSON
 1. 复制示例配置（首次使用）：
 
    ```bash
-   copy tools\cfg\workflow.example.yaml tools\cfg\workflow.yaml
+   copy tools\cfg\workflow_config.yaml.example tools\cfg\workflow_config.yaml
    ```
 
 2. 修改配置（按实际路径/参数；重点是 `paths` 与 `project`）：
    - `tools/cfg/default.yaml`：系统默认
    - `tools/cfg/workflow.yaml`：完整工作流 stage 定义
-   - 项目根 `workflow_config.yaml`：项目级覆盖（可选）
+   - `tools/cfg/workflow_config.yaml`：项目级覆盖（默认入口）
 
 3. **第零段（数据接续）**——补数据时跑：
 
@@ -159,7 +159,7 @@ SAM / YOLO 自动标注 ──► LabelMe JSON
 4. **第一段（准备）**——跑到人工清洗检查点停：
 
    ```bash
-   .conda\python.exe tools\workflow.py --config workflow_config.yaml --from-stage auto_annotate
+   .conda\python.exe tools\workflow.py --from-stage auto_annotate
    ```
 
    到达 `manual_review` 之前会自动停止。
@@ -169,13 +169,13 @@ SAM / YOLO 自动标注 ──► LabelMe JSON
 6. **第二段（训练）**——人工清洗完后再跑：
 
    ```bash
-   .conda\python.exe tools\workflow.py --config workflow_config.yaml --from-stage select_subset
+   .conda\python.exe tools\workflow.py --from-stage select_subset
    ```
 
    或者一次性预览整条链路：
 
    ```bash
-   .conda\python.exe tools\workflow.py --config workflow_config.yaml --dry-run
+   .conda\python.exe tools\workflow.py --dry-run
    ```
 
 ---
@@ -191,7 +191,7 @@ SAM / YOLO 自动标注 ──► LabelMe JSON
 ```batch
 @echo off
 cd /d D:\PycharmProjects\cjet-vision-pipeline
-D:\PycharmProjects\cjet-vision-pipeline\.conda\python.exe tools\workflow.py --config workflow_config.yaml --from-stage auto_annotate
+D:\PycharmProjects\cjet-vision-pipeline\.conda\python.exe tools\workflow.py --from-stage auto_annotate
 ```
 
 以及 `daily_workflow_train.bat`：
@@ -199,7 +199,7 @@ D:\PycharmProjects\cjet-vision-pipeline\.conda\python.exe tools\workflow.py --co
 ```batch
 @echo off
 cd /d D:\PycharmProjects\cjet-vision-pipeline
-D:\PycharmProjects\cjet-vision-pipeline\.conda\python.exe tools\workflow.py --config workflow_config.yaml --from-stage select_subset
+D:\PycharmProjects\cjet-vision-pipeline\.conda\python.exe tools\workflow.py --from-stage select_subset
 ```
 
 然后创建任务：
@@ -211,9 +211,9 @@ D:\PycharmProjects\cjet-vision-pipeline\.conda\python.exe tools\workflow.py --co
 
 ```cron
 # 上午跑准备阶段
-0 8 * * * cd /path/to/cjet-vision-pipeline && .conda/python tools/workflow.py --config workflow_config.yaml --from-stage auto_annotate
+0 8 * * * cd /path/to/cjet-vision-pipeline && .conda/python tools/workflow.py --from-stage auto_annotate
 # 下午人工清洗后跑训练阶段
-30 16 * * * cd /path/to/cjet-vision-pipeline && .conda/python tools/workflow.py --config workflow_config.yaml --from-stage select_subset
+30 16 * * * cd /path/to/cjet-vision-pipeline && .conda/python tools/workflow.py --from-stage select_subset
 ```
 
 ---
@@ -271,7 +271,7 @@ D:\PycharmProjects\cjet-vision-pipeline\.conda\python.exe tools\workflow.py --co
 新增业务阶段时，只需：
 
 1. 编写单功能脚本（按阶段放在 `tools/` 对应子目录下）；
-2. 在 `workflow_config.yaml` 的 `stages` 列表中追加一段 `name` + `command`；
+2. 在 `tools/cfg/workflow.yaml` 的 `stages` 列表中追加一段 `name` + `command`；
 3. 用 `--dry-run` 验证命令是否正确。
 
 如果新增的脚本里有可复用的常量 / 函数（图片扫描、LabelMe 读写、几何工具等），

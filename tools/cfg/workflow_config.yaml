@@ -1,0 +1,31 @@
+# CJET 数据生产工作流配置（项目级覆盖入口）
+# 完整配置在 tools/cfg/ 下，结构：
+#   - tools/cfg/default.yaml           系统默认（paths / parameters / log_file）
+#   - tools/cfg/workflow.yaml          系统主工作流（完整 stage 定义）
+#   - tools/cfg/workflow.example.yaml  系统主工作流的完整示例
+#   - tools/cfg/workflow_config.yaml   本文件：项目级覆盖入口
+#   - tools/cfg/workflow_config.yaml.example  本文件的示例
+#
+# tools/workflow.py 默认就指向本文件；resolve_config() 会自动叠加
+# default + workflow + 本文件，stage 按 name 去重拼接。
+#
+# 跑法：
+#   .conda\python.exe tools\workflow.py --dry-run
+#   .conda\python.exe tools\workflow.py --from-stage backup_snapshot
+#   .conda\python.exe tools\workflow.py --config tools\cfg\workflow.yaml   # 也可显式指定系统主工作流
+
+# ---------- 项目特定覆盖 ----------
+# 完整 path 列表与默认值见 tools/cfg/default.yaml
+paths:
+  backup_dir: C:/Users/EDY/Pictures
+  autolabel: datasets/autolabel
+  behavior: datasets/behavior
+
+# ---------- 不覆盖 stage ----------
+# 所有 stage 都在 tools/cfg/workflow.yaml 里定义；本任务相关的 4 个 stage
+# （backup_snapshot / inherit_dataset / fix_labelme / rename_with_labelme_sync）
+# 默认已 enabled。如需单独禁用某 stage，加在这里：
+#
+# stages:
+#   - name: backup_snapshot
+#     enabled: false

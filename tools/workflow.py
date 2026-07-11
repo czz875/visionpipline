@@ -2,9 +2,8 @@
 工作流编排器（仿 ultralytics 风格的薄编排层）。
 
 只负责"按顺序跑 stage"这一件事；YAML 解析、变量替换、配置合并都搬到了
-``tools.cfg``。默认从 ``tools/cfg/workflow.yaml`` 加载配置，自动叠加
-``tools/cfg/default.yaml``；也可以传项目根的 ``workflow_config.yaml`` 作为
-项目覆盖入口。
+``tools.cfg``。默认从 ``tools/cfg/workflow_config.yaml`` 加载项目入口，
+自动叠加 ``tools/cfg/default.yaml`` + ``tools/cfg/workflow.yaml``。
 
 典型用法：
 
@@ -14,8 +13,8 @@
     # 真跑第零段
     python tools/workflow.py --from-stage backup_snapshot --to-stage rename_with_labelme_sync
 
-    # 项目级覆盖（兼容老路径）
-    python tools/workflow.py --config workflow_config.yaml
+    # 也可显式指定其它入口（如直接用系统主工作流）
+    python tools/workflow.py --config tools/cfg/workflow.yaml
 """
 
 from __future__ import annotations
@@ -31,8 +30,8 @@ if __name__ == "__main__" and __package__ in (None, ""):
 
 from tools.cfg import (
     DEFAULT_LOG,
+    PROJECT_CFG_PATH,
     PROJECT_ROOT,
-    WORKFLOW_CFG_PATH,
     flatten_dict,
     resolve_config,
     substitute_variables,
@@ -43,8 +42,8 @@ from tools.cfg import (
 # 1. 默认参数
 # =============================================================================
 
-DEFAULT_CONFIG = WORKFLOW_CFG_PATH          # 默认 tools/cfg/workflow.yaml
-DEFAULT_LOG_FILE = DEFAULT_LOG               # workflow.log（在 tools/cfg/__init__.py 里定义）
+DEFAULT_CONFIG = PROJECT_CFG_PATH                 # 默认 tools/cfg/workflow_config.yaml
+DEFAULT_LOG_FILE = DEFAULT_LOG                    # workflow.log（在 tools/cfg/__init__.py 里定义）
 
 
 # =============================================================================

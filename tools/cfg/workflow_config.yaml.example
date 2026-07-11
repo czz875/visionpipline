@@ -1,0 +1,62 @@
+# tools/cfg/workflow_config.yaml.example
+# 项目级覆盖入口示例。首次使用流程：
+#   1) copy tools\cfg\workflow_config.yaml.example tools\cfg\workflow_config.yaml
+#   2) 编辑 paths 等项目特定项
+#   3) .conda\python.exe tools\workflow.py --dry-run
+#
+# tools/cfg/ 下完整配置结构：
+#   - default.yaml                  系统默认（paths / parameters / log_file）
+#   - workflow.yaml                 系统主工作流（17 个 stage）
+#   - workflow.example.yaml         系统主工作流完整示例
+#   - workflow_config.yaml          项目级覆盖入口（用户可改）
+#   - workflow_config.yaml.example  本文件
+#
+# tools/workflow.py 默认走 workflow_config.yaml；想直接跑系统主工作流可
+# 显式 --config tools\cfg\workflow.yaml。
+
+# ---------- 项目特定覆盖 ----------
+paths:
+  # 接续段（备份 / autolabel 接续 / JSON 修复 / 重命名）
+  backup_dir: C:/Users/EDY/Pictures
+  autolabel: datasets/autolabel
+  behavior: datasets/behavior
+
+  # 准备段（PNG 数据 → 自动标注 → 框合并 → 清洗 → 人工清洗检查点）
+  raw_jpg: datasets/raw_jpg
+  raw_data: datasets/raw
+  ir_aug: datasets/raw_ir_aug
+  annotated: datasets/01_annotated
+  cleaned: datasets/01_annotated
+  blurry_output: datasets/_blurry
+
+  # 训练段（拆分 → YOLO → 训练 → 自标注 → 回 LabelMe → 终洗 → 归档）
+  high_quality: datasets/02_high_quality_30
+  remaining: datasets/02_remaining_70
+  yolo: datasets/yolo
+  model_dir: runs/train
+  self_annotated_labels: datasets/04_self_annotated_labels
+  labelme_final: datasets/05_labelme_final
+  archive: archive
+
+# ---------- 可选：覆盖默认参数 ----------
+# 不写就走 tools/cfg/default.yaml 里的值。
+# parameters:
+#   merge_distance_x: 100
+#   merge_distance_y: 200
+#   blurry_threshold: 0.185
+#   high_quality_ratio: 0.3
+#   yolo_epochs: 100
+#   yolo_classes: "phone,cigarette,face,hand"
+#   inherit_batch_size: 1000
+#   snapshot_level: 6
+
+# ---------- 可选：禁用某些 stage ----------
+# 默认所有 stage 都 enabled；本文件里 disabled 后走 tools/cfg/workflow.yaml
+# 里该 stage 时会被跳过。
+# stages:
+#   - name: jpg_to_png
+#     enabled: false
+#   - name: ir_enhance
+#     enabled: false
+#   - name: create_tar_gz
+#     enabled: false
