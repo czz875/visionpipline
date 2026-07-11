@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from datetime import datetime
@@ -36,6 +37,21 @@ from tools.cfg import (
     resolve_config,
     substitute_variables,
 )
+
+
+# =============================================================================
+# 0. 子进程 PATH：让 stage 里的 `python` / `yolo` 走到项目自带的 .conda
+# =============================================================================
+# tools/workflow.py 本身是被 .conda\python.exe 启动的，但 stage command 里的
+# `python` / `yolo` 命令走 shell PATH 查找。把 .conda 和 .conda\Scripts
+# 显式 prepend 到 os.environ["PATH"]，避免子进程 shell 找不到解释器
+# （同时让 ultralytics 装的 `yolo` CLI 也能找到）。
+_CONDA_DIR = PROJECT_ROOT / ".conda"
+if _CONDA_DIR.is_dir() and sys.platform == "win32":
+    for sub in ("", "Scripts"):
+        p = str(_CONDA_DIR / sub) if sub else str(_CONDA_DIR)
+        if p not in os.environ.get("PATH", "").split(os.pathsep):
+            os.environ["PATH"] = p + os.pathsep + os.environ.get("PATH", "")
 
 
 # =============================================================================
