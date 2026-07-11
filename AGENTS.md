@@ -353,6 +353,20 @@ if __name__ == "__main__" and __package__ in (None, ""):
   把 `src/` 加入 `sys.path`，所以如果你在 `src/supervision/` 下改过代码，
   直接运行脚本就能生效，不需要重装。
 
+- **rename 不动 JSON 的 mtime 排序**：`tools/rename/timestamp_rename.py`
+  只对 PNG/JPG 按 mtime 排序改名；LabelMe JSON 不参与排序（它的 mtime
+  是 `inherit` / `auto-annotate` 的生成时间，跟 PNG 原始拍照时间天然
+  错位）。同名 JSON 会跟着 PNG 一起改名为 `<新图名>.json`，并同步
+  `imagePath` 字段。
+
+- **labelme_to_yolo 没有 `--ratios`**：脚本默认 `DEFAULT_RATIOS = (0.9, 0.1)`
+  硬编码，未暴露成 CLI 参数。`tools/cfg/workflow.yaml` 的 `convert_to_yolo`
+  stage 不要传 `--ratios`，会报错。
+
+- **PNG/JSON 错位补救**：如果历史批次 PNG 和 JSON 已经错位（JSON 文件名
+  和 imagePath 指向的 PNG basename 不一致），跑
+  `python tools/label/align_labelme.py --root <批次目录> --apply` 一键对齐。
+
 ---
 
 ## 7. AI 助手任务执行 checklist

@@ -119,29 +119,71 @@ def _resolve_collision(
         seq += 1
 
 
-def _sync_labelme_imagepath(old_image: Path, new_image: Path) -> bool:
-    """把 ``old_image`` 同目录同名 JSON 的 ``imagePath`` 改成 ``new_image.name``。
+def _plan_labelme_sync(
+    old_image: Path,
+    new_image: Path,
+) -> tuple[Path, Path] | None:
+    """计算 LabelMe JSON 同步计划。
 
-    找不到同名 JSON / JSON 解析失败 / 字段不存在时静默跳过。
-    返回 ``True`` 表示成功改写或 dry-run 也将改写。
+    只处理 PNG/JPG 的同名 JSON；JSON 不参与图片的 mtime 排序。
+    返回 ``(json_old, json_new)``；找不到同名 JSON 时返回 ``None``。
     """
     if old_image.suffix.lower() not in {".png", ".jpg", ".jpeg"}:
-        return False
+        return None
     json_path = old_image.with_suffix(".json")
     if not json_path.exists():
-        return False
+        return None
+    new_json_path = new_image.with_suffix(".json")
+    if json_path == new_json_path:
+        return None
+    return (json_path, new_json_path)
+
+
+def _apply_labelme_sync(
+    old_image: Path,
+    new_image: Path,
+) -> None:
+    """把 ``old_image`` 同目录同名 JSON 跟着 PNG 一起改名 + 同步 imagePath。
+
+    找不到同名 JSON / JSON 解析失败时静默跳过（视为该 PNG 没有配对标注）。
+    撞名时在 JSON 文件名后加 ``__dupN`` 兜底。
+    """
+    plan = _plan_labelme_sync(old_image, new_image)
+    if plan is None:
+        return
+    json_path, new_json_path = plan
+    new_image_name = new_image.name
+
+    # 1) 同步 imagePath 字段
     try:
         data = json.loads(json_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
-        return False
-    if data.get("imagePath") == new_image.name:
-        return False
-    data["imagePath"] = new_image.name
-    json_path.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return True
+        data = None
+    if data is not None and data.get("imagePath") != new_image_name:
+        data["imagePath"] = new_image_name
+        try:
+            json_path.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except OSError:
+            return
+
+    # 2) 改名 JSON 文件（撞名兜底）
+    if new_json_path.exists():
+        base = new_json_path.stem
+        suffix = new_json_path.suffix
+        n = 1
+        while True:
+            cand = new_json_path.parent / f"{base}__dup{n}{suffix}"
+            if not cand.exists():
+                new_json_path = cand
+                break
+            n += 1
+    try:
+        json_path.rename(new_json_path)
+    except OSError:
+        pass
 
 
 def rename_by_timestamp(
@@ -155,16 +197,23 @@ def rename_by_timestamp(
 ) -> list[tuple[Path, Path]]:
     """执行批量重命名。返回 ``(old, new)`` 计划列表（dry-run 时也返回，但不会写盘）。
 
-    当 ``labelme_sync=True`` 时，会在每次改 PNG/JPG 名后同步同名 LabelMe JSON
-    的 ``imagePath`` 字段。仅 PNG/JPG 会触发同步，其他扩展名忽略。
+    **只对 PNG / JPG 排序改名**——LabelMe JSON 不参与 mtime 排序，否则
+    JSON 复制时间或 auto-annotate 生成时间会和 PNG 原始拍照时间错位，
+    导致 PNG 和 JSON 改名为不同序号、不同时间戳，配对关系彻底乱掉。
+
+    当 ``labelme_sync=True`` 时，会让每个 PNG/JPG 的**当前同名** LabelMe
+    JSON 一起改名为 ``<新图名>.json``，并同步其 ``imagePath`` 字段。
     """
     files = _collect_files(source_dir, recursive=recursive)
 
     attr = "st_mtime" if time_source == "mtime" else "st_ctime"
-    files.sort(key=lambda p: getattr(p.stat(), attr))
+
+    image_suffixes = {".png", ".jpg", ".jpeg"}
+    image_files = [p for p in files if p.suffix.lower() in image_suffixes]
+    image_files.sort(key=lambda p: getattr(p.stat(), attr))
 
     plans: list[tuple[Path, Path]] = []
-    for seq, src in enumerate(tqdm(files, desc="规划改名", unit="file", leave=False), start=1):
+    for seq, src in enumerate(tqdm(image_files, desc="规划改名", unit="file", leave=False), start=1):
         ts = getattr(src.stat(), attr)
         stem = _timestamp_to_str(ts)
         suffix = _is_multi_ext(src)
@@ -183,7 +232,7 @@ def rename_by_timestamp(
     for old, new in tqdm(plans, desc=op_label, unit="file"):
         old.rename(new)
         if labelme_sync:
-            _sync_labelme_imagepath(old, new)
+            _apply_labelme_sync(old, new)
     return plans
 
 
