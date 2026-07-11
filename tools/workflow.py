@@ -145,17 +145,28 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> int:
-    """脚本入口。"""
-    parser = build_parser()
-    args = parser.parse_args()
+def run(
+    cfg: Path | str | None = None,
+    *,
+    dry_run: bool = False,
+    from_stage: str = "",
+    to_stage: str = "",
+) -> int:
+    """跑工作流（Python API 版，不依赖 sys.argv）。
 
-    if not args.config.exists():
-        print(f"[错误] 配置文件不存在：{args.config}")
+    等价于命令行：
+        python tools/workflow.py --config <cfg> [--dry-run] \
+            [--from-stage X] [--to-stage Y]
+
+    ``cfg`` 为 None 时走 ``tools/cfg/workflow_config.yaml`` 默认入口。
+    """
+    config_path = Path(cfg) if cfg is not None else PROJECT_CFG_PATH
+    if not config_path.exists():
+        print(f"[错误] 配置文件不存在：{config_path}")
         return 1
 
     # 走 tools.cfg.resolve_config：自动叠加 default + workflow + 用户配置
-    config = resolve_config(args.config)
+    config = resolve_config(config_path)
     mapping = flatten_dict(config)
     mapping["date"] = datetime.now().strftime("%Y%m%d")
     mapping["datetime"] = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -169,30 +180,42 @@ def main() -> int:
         print("[警告] 配置文件中没有定义 stages。")
         return 0
 
-    started = not args.from_stage
+    started = not from_stage
     for stage in stages:
         name = stage.get("name", "unnamed")
 
-        if args.to_stage and name == args.to_stage:
+        if to_stage and name == to_stage:
             print(f"\n[暂停] 已到达阶段 '{name}' 前，等待人工处理。")
             return 0
 
         if not stage.get("enabled", True):
             continue
 
-        if not started and args.from_stage:
-            if name == args.from_stage:
+        if not started and from_stage:
+            if name == from_stage:
                 started = True
             else:
                 print(f"[跳过] {name}")
                 continue
 
-        if not run_stage(stage, mapping, args.dry_run, log_path):
+        if not run_stage(stage, mapping, dry_run, log_path):
             print(f"\n[终止] 阶段 {name} 失败，工作流中断。")
             return 1
 
     print("\n[完成] 工作流全部阶段执行完毕。")
     return 0
+
+
+def main() -> int:
+    """CLI 入口（薄壳，参数解析后转给 run()）。"""
+    parser = build_parser()
+    args = parser.parse_args()
+    return run(
+        cfg=args.config,
+        dry_run=args.dry_run,
+        from_stage=args.from_stage,
+        to_stage=args.to_stage,
+    )
 
 
 if __name__ == "__main__":
