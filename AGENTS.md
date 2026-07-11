@@ -83,6 +83,10 @@ cjet-vision-pipeline/
 │   │   ├── archive.py             #   按时间戳归档
 │   │   └── create_tar_gz.py       #   压缩归档为 .tar.gz
 │   └── workflow.py                # 工作流编排器入口（薄编排，配置解析走 tools.cfg）
+├── src/                           # 本地入口 + 临时工作流（被 .gitignore 整体忽略，不入 git）
+│   ├── run.py                     #   临时工作流统一入口（按需切换 cfg；默认 dry_run=True）
+│   ├── main.py                    #   详细参数版入口（Python 函数式）
+│   └── *.yaml                     #   临时工作流 cfg（命名：<功能>.yaml，如 recover_yolo0708.yaml）
 ├── workflow.md                    # 工作流说明文档
 ├── workflow_config.yaml           # 项目级覆盖入口（与 tools/cfg/workflow.yaml 配合）
 ├── workflow_config.yaml.example   # 迁移提示（指向 tools/cfg/）
@@ -184,6 +188,23 @@ if __name__ == "__main__" and __package__ in (None, ""):
 - 自己手写 `labelme2yolo` 转换器（`supervision.as_yolo` 已经实现）；
 - 自己用 `cv2` 检测模糊图像（`cleanvision.Imagelab` 已经有专门接口）；
 - 自己用 `numpy` 计算 IOU / NMS（`supervision` 已有 `box_iou`、`non_max_suppression`）。
+
+### 4.9 临时工作流规范（任务专项 cfg）
+
+一次性 / 临时 / 任务专项工作流**不**写到 `tools/cfg/`，而是：
+
+- **cfg 放 `src/`**（被 `.gitignore` 整体忽略，**不入 git**）。
+- **优先用 `stages_only` 机制** 引用 `tools/cfg/workflow.yaml` 已有 stage
+  （参考 `tools/cfg/inherit_yolo.yaml` 风格）。只有在现有 stage 拼不出来时，
+  才在临时 cfg 里**直接定义 stage 命令**（不走 workflow.yaml）。
+- **不写一次性专用 Python 脚本**——除非该功能**明确**有未来通用需求
+  （按 §4.6 "等真的出现第二次重复时再抽函数"原则，单次需求**不**算通用）。
+- **入口用 `src/run.py`**：要切 cfg / 改参数直接编辑 `run()` 函数体
+  （默认 `dry_run=True` 安全预览）。Python 函数式入口用 `src/main.py`。
+- **命名约定**：临时 cfg 用 `<功能>.yaml`（如 `src/recover_yolo0708.yaml`）。
+  入口脚本是否新建 `<功能>.py` / `src/run_<功能>.py` **按需求询问创建**：
+  默认复用 `src/run.py` 切换 cfg 即可；如下游有独立参数 / 独立 dry_run
+  默认值 / 多入口并存需求，再询问用户是否新建。
 
 ---
 
@@ -324,6 +345,17 @@ if __name__ == "__main__" and __package__ in (None, ""):
 .conda\python.exe tools\workflow.py --config tools\cfg\workflow.yaml --dry-run
 ```
 
+**临时工作流**（cfg 在 `src/`，不入 git）：
+
+```bash
+# 临时 cfg 预览（src/run.py 已设好 cfg + 默认 dry_run=True）
+python -m src.run
+
+# 临时 cfg 真写盘：改 src/run.py 的 dry_run=False 再跑
+# 或直接用 workflow CLI 透传：
+python -m tools.workflow --config src\recover_yolo0708.yaml --from-stage inherit_yolo0708
+```
+
 ### 5.4 测试
 
 ```bash
@@ -366,6 +398,11 @@ if __name__ == "__main__" and __package__ in (None, ""):
 - **PNG/JSON 错位补救**：如果历史批次 PNG 和 JSON 已经错位（JSON 文件名
   和 imagePath 指向的 PNG basename 不一致），跑
   `python tools/label/align_labelme.py --root <批次目录> --apply` 一键对齐。
+
+- **临时工作流 cfg 放 `src/`**（被 `.gitignore` 整体忽略，不入 git）：
+  不要往 `tools/cfg/` 写临时 cfg（避免污染主工作流）。`src/run.py` 是临时
+  工作流统一入口，按需切换 cfg；改 cfg 字符串 / `dry_run` 即可跑不同任务。
+  详见 §4.9 临时工作流规范。
 
 ---
 
