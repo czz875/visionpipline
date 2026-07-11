@@ -14,6 +14,8 @@ _*.py
 _*.txt
 _*.md
 .conda_envs_dir_test
+# 但保留 Python 包的 __init__.py 标识文件
+!**/__init__.py
 
 # ===== 便携式 Python 解释器（项目自带）=====
 .conda/

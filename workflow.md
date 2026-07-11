@@ -7,6 +7,8 @@
 > 本项目位于 `d:\PycharmProjects\cjet-vision-pipeline`，
 > Python 环境使用项目自带的便携式解释器 `.conda\python.exe`，
 > 依赖清单见 [requirements.txt](requirements.txt)。
+> 项目结构仿 [ultralytics](https://github.com/ultralytics/ultralytics)：
+> 业务脚本分到 `tools/<stage>/`，所有 yaml 配置集中在 `tools/cfg/`，工作流编排器在 `tools/workflow.py`。
 
 ---
 
@@ -115,13 +117,16 @@ SAM / YOLO 自动标注 ──► LabelMe JSON
 
 ### 快速开始
 
-1. 复制示例配置：
+1. 复制示例配置（首次使用）：
 
    ```bash
-   copy workflow_config.yaml.example workflow_config.yaml
+   copy tools\cfg\workflow.example.yaml tools\cfg\workflow.yaml
    ```
 
-2. 修改 `workflow_config.yaml` 中的路径、参数、类别（重点是 `paths` 与 `project`）。
+2. 修改配置（按实际路径/参数；重点是 `paths` 与 `project`）：
+   - `tools/cfg/default.yaml`：系统默认
+   - `tools/cfg/workflow.yaml`：完整工作流 stage 定义
+   - 项目根 `workflow_config.yaml`：项目级覆盖（可选）
 
 3. **第零段（数据接续）**——补数据时跑：
 

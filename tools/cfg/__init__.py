@@ -1,0 +1,180 @@
+"""
+tools/cfg
+
+工作流配置加载、变量替换、合并逻辑（仿 ultralytics/cfg）。
+
+公开 API：
+- ``load_config(path)``：加载单个 YAML/JSON
+- ``flatten_dict(data)``：嵌套字典拍平为 ``prefix.key -> str``
+- ``substitute_variables(command, mapping)``：替换命令中的 ``${prefix.key}``
+- ``merge_configs(*configs)``：浅合并多个配置 dict（后写覆盖前写）
+- ``resolve_config(project_path)``：根据项目路径自动加载
+  ``tools/cfg/default.yaml`` + ``tools/cfg/workflow.yaml`` + 项目自己的覆盖文件，
+  返回合并后的 dict。
+- ``iter_stage_files()``：列出 ``tools/cfg/`` 下所有 ``*.yaml``（按字母序）
+
+典型用法：
+
+    from tools.cfg import load_config, resolve_config
+
+    cfg = load_config(Path("tools/cfg/workflow.yaml"))
+    cfg = resolve_config(Path("workflow_config.yaml"))
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+from pathlib import Path
+from typing import Iterable
+
+if __name__ == "__main__" and __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+
+# =============================================================================
+# 1. 默认常量
+# =============================================================================
+
+CFG_DIR = Path(__file__).resolve().parent          # tools/cfg/
+PROJECT_ROOT = CFG_DIR.resolve().parent.parent    # 项目根目录
+DEFAULT_CFG_PATH = CFG_DIR / "default.yaml"
+WORKFLOW_CFG_PATH = CFG_DIR / "workflow.yaml"
+EXAMPLE_CFG_PATH = CFG_DIR / "workflow.example.yaml"
+DEFAULT_LOG = Path("workflow.log")                 # 默认日志名（相对项目根）
+
+_PLACEHOLDER_RE = re.compile(r"\$\{([^}]+)\}")
+
+
+# =============================================================================
+# 2. 加载 / 解析
+# =============================================================================
+
+
+def load_config(path: Path) -> dict:
+    """加载单个 YAML 或 JSON 配置文件，返回 dict。
+
+    失败时抛 ``ImportError``（YAML 缺 PyYAML）或 ``ValueError``（格式不支持）。
+    """
+    path = Path(path)
+    suffix = path.suffix.lower()
+    text = path.read_text(encoding="utf-8")
+    if suffix in (".yaml", ".yml"):
+        try:
+            import yaml  # PyYAML 是项目间接依赖
+        except ImportError as e:
+            raise ImportError(
+                "读取 YAML 需要 PyYAML，请安装：pip install pyyaml"
+            ) from e
+        return yaml.safe_load(text) or {}
+    if suffix == ".json":
+        return json.loads(text)
+    raise ValueError(f"不支持的配置文件格式：{suffix}")
+
+
+def flatten_dict(
+    data: dict,
+    parent_key: str = "",
+    sep: str = ".",
+) -> dict[str, str]:
+    """把嵌套字典拍平为 ``prefix.key -> str`` 映射，用于变量替换。"""
+    items: dict[str, str] = {}
+    for key, value in data.items():
+        new_key = f"{parent_key}{sep}{key}" if parent_key else key
+        if isinstance(value, dict):
+            items.update(flatten_dict(value, new_key, sep))
+        else:
+            items[new_key] = str(value)
+    return items
+
+
+def substitute_variables(command: str, mapping: dict[str, str]) -> str:
+    """把命令中的 ``${prefix.key}`` 占位符替换为 ``mapping`` 里的值；找不到则保留原占位符。"""
+    def _repl(match: re.Match) -> str:
+        return mapping.get(match.group(1), match.group(0))
+    return _PLACEHOLDER_RE.sub(_repl, command)
+
+
+def merge_configs(*configs: dict) -> dict:
+    """浅合并多个 dict；后面的覆盖前面的。"""
+    merged: dict = {}
+    for cfg in configs:
+        if not cfg:
+            continue
+        for key, value in cfg.items():
+            if (
+                key in merged
+                and isinstance(merged[key], dict)
+                and isinstance(value, dict)
+            ):
+                merged[key] = {**merged[key], **value}
+            else:
+                merged[key] = value
+    return merged
+
+
+# =============================================================================
+# 3. 项目级配置解析
+# =============================================================================
+
+
+def iter_stage_files() -> list[Path]:
+    """列出 ``tools/cfg/`` 下所有 ``*.yaml``，按字母序。"""
+    return sorted(CFG_DIR.glob("*.yaml"))
+
+
+def resolve_config(project_path: Path | None = None) -> dict:
+    """根据项目入口文件路径加载完整配置。
+
+    加载顺序（后写覆盖前写）：
+    1. ``tools/cfg/default.yaml``（系统默认）
+    2. ``tools/cfg/workflow.yaml``（项目工作流基线）
+    3. ``project_path``（项目根的覆盖文件，可选）
+
+    Args:
+        project_path: 项目根下的覆盖 yaml，``None`` 时只加载前两份。
+
+    Returns:
+        合并后的 dict，``stages`` 列表也会被合并（不去重）。
+    """
+    layers: list[dict] = []
+    if DEFAULT_CFG_PATH.exists():
+        layers.append(load_config(DEFAULT_CFG_PATH))
+    if WORKFLOW_CFG_PATH.exists():
+        layers.append(load_config(WORKFLOW_CFG_PATH))
+    if project_path is not None:
+        project_path = Path(project_path)
+        if project_path.exists():
+            layers.append(load_config(project_path))
+
+    # dict 浅合并
+    merged = merge_configs(*layers)
+    # stages 列表需要拼接（merge_configs 浅合并会被覆盖，所以手动拼）
+    stages: list[dict] = []
+    seen_stage_names: set[str] = set()
+    for layer in layers:
+        for stage in layer.get("stages", []) or []:
+            name = stage.get("name", "")
+            if name in seen_stage_names:
+                continue
+            stages.append(stage)
+            seen_stage_names.add(name)
+    merged["stages"] = stages
+    return merged
+
+
+__all__ = [
+    "CFG_DIR",
+    "DEFAULT_CFG_PATH",
+    "DEFAULT_LOG",
+    "EXAMPLE_CFG_PATH",
+    "PROJECT_ROOT",
+    "WORKFLOW_CFG_PATH",
+    "flatten_dict",
+    "iter_stage_files",
+    "load_config",
+    "merge_configs",
+    "resolve_config",
+    "substitute_variables",
+]

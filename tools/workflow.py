@@ -1,83 +1,55 @@
 """
-工作流编排器。
+工作流编排器（仿 ultralytics 风格的薄编排层）。
 
-读取 YAML/JSON 配置文件，按顺序执行各个阶段。每个阶段调用一个现有工具脚本，
-从而把“补充数据 -> 标注 -> 合并 -> 清洗 -> 拆分 -> YOLO -> 训练 -> 自标注 ->
-回 LabelMe -> 再清洗 -> 归档”整条链路串起来。
+只负责"按顺序跑 stage"这一件事；YAML 解析、变量替换、配置合并都搬到了
+``tools.cfg``。默认从 ``tools/cfg/workflow.yaml`` 加载配置，自动叠加
+``tools/cfg/default.yaml``；也可以传项目根的 ``workflow_config.yaml`` 作为
+项目覆盖入口。
 
 典型用法：
 
+    # 预览
+    python tools/workflow.py --dry-run
+
+    # 真跑第零段
+    python tools/workflow.py --from-stage backup_snapshot --to-stage rename_with_labelme_sync
+
+    # 项目级覆盖（兼容老路径）
     python tools/workflow.py --config workflow_config.yaml
-
-只预览不执行：
-
-    python tools/workflow.py --config workflow_config.yaml --dry-run
-
-从某个阶段开始执行：
-
-    python tools/workflow.py --config workflow_config.yaml --from-stage train_yolo
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-import re
 
-DEFAULT_CONFIG = Path("workflow_config.yaml")
-DEFAULT_LOG = Path("workflow.log")
+if __name__ == "__main__" and __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-
-def load_config(path: Path) -> dict:
-    """加载 YAML 或 JSON 配置文件。"""
-    suffix = path.suffix.lower()
-    text = path.read_text(encoding="utf-8")
-    if suffix in (".yaml", ".yml"):
-        try:
-            import yaml
-        except ImportError as e:
-            raise ImportError(
-                "读取 YAML 需要 PyYAML，请安装：pip install pyyaml"
-            ) from e
-        return yaml.safe_load(text)
-    if suffix == ".json":
-        return json.loads(text)
-    raise ValueError(f"不支持的配置文件格式：{suffix}")
+from tools.cfg import (
+    DEFAULT_LOG,
+    PROJECT_ROOT,
+    WORKFLOW_CFG_PATH,
+    flatten_dict,
+    resolve_config,
+    substitute_variables,
+)
 
 
-def flatten_dict(
-    data: dict,
-    parent_key: str = "",
-    sep: str = ".",
-) -> dict[str, str]:
-    """把嵌套字典拍平为 ``prefix.key`` -> str 的映射，用于变量替换。"""
-    items: dict[str, str] = {}
-    for key, value in data.items():
-        new_key = f"{parent_key}{sep}{key}" if parent_key else key
-        if isinstance(value, dict):
-            items.update(flatten_dict(value, new_key, sep))
-        else:
-            items[new_key] = str(value)
-    return items
+# =============================================================================
+# 1. 默认参数
+# =============================================================================
+
+DEFAULT_CONFIG = WORKFLOW_CFG_PATH          # 默认 tools/cfg/workflow.yaml
+DEFAULT_LOG_FILE = DEFAULT_LOG               # workflow.log（在 tools/cfg/__init__.py 里定义）
 
 
-_PLACEHOLDER_RE = re.compile(r"\$\{([^}]+)\}")
-
-
-def substitute_variables(command: str, mapping: dict[str, str]) -> str:
-    """将命令中的 ``${prefix.key}`` 占位符替换为实际值。
-
-    支持点号分隔的嵌套键（如 ``${paths.raw_data}``）。未找到时保留原占位符。
-    """
-    def _repl(match: re.Match) -> str:
-        key = match.group(1)
-        return mapping.get(key, match.group(0))
-
-    return _PLACEHOLDER_RE.sub(_repl, command)
+# =============================================================================
+# 2. Stage 执行
+# =============================================================================
 
 
 def run_stage(
@@ -86,11 +58,7 @@ def run_stage(
     dry_run: bool,
     log_path: Path,
 ) -> bool:
-    """执行单个阶段。
-
-    Returns:
-        成功返回 ``True``，失败返回 ``False``。
-    """
+    """执行单个 stage。成功返回 ``True``，失败返回 ``False``。"""
     name = stage.get("name", "unnamed")
     raw_command = stage.get("command", "")
     if not raw_command:
@@ -114,23 +82,35 @@ def run_stage(
     if result.returncode != 0:
         print(f"    [失败] 阶段 {name} 返回码 {result.returncode}")
         with log_path.open("a", encoding="utf-8") as log:
-            log.write(f"[{datetime.now().isoformat(timespec='seconds')}] [{name}] FAILED rc={result.returncode}\n")
+            log.write(
+                f"[{datetime.now().isoformat(timespec='seconds')}] "
+                f"[{name}] FAILED rc={result.returncode}\n"
+            )
         return False
 
     print(f"    [完成] 阶段 {name}")
     return True
 
 
+# =============================================================================
+# 3. CLI
+# =============================================================================
+
+
 def build_parser() -> argparse.ArgumentParser:
     """构造命令行参数解析器。"""
     parser = argparse.ArgumentParser(
-        description="LabelMe / YOLO 训练数据工作流编排器。"
+        description="CJET 数据生产工作流编排器。"
     )
     parser.add_argument(
         "--config",
         type=Path,
         default=DEFAULT_CONFIG,
-        help=f"工作流配置文件（默认：{DEFAULT_CONFIG}）。",
+        help=(
+            "配置文件路径；可为项目根的 workflow_config.yaml（兼容老路径，"
+            "自动叠加 tools/cfg/default.yaml + tools/cfg/workflow.yaml），"
+            f"或直接传 tools/cfg/workflow.yaml。默认：{DEFAULT_CONFIG}"
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -159,12 +139,14 @@ def main() -> int:
         print(f"[错误] 配置文件不存在：{args.config}")
         return 1
 
-    config = load_config(args.config)
+    # 走 tools.cfg.resolve_config：自动叠加 default + workflow + 用户配置
+    config = resolve_config(args.config)
     mapping = flatten_dict(config)
     mapping["date"] = datetime.now().strftime("%Y%m%d")
     mapping["datetime"] = datetime.now().strftime("%Y%m%d_%H%M%S")
+    mapping["project_root"] = str(PROJECT_ROOT)
 
-    log_path = Path(config.get("log_file", str(DEFAULT_LOG)))
+    log_path = Path(config.get("log_file", str(DEFAULT_LOG_FILE)))
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     stages = config.get("stages", [])

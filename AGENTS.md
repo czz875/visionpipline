@@ -38,13 +38,21 @@ cjet-vision-pipeline/
 ├── runs/                          # yolo detect train 输出
 ├── archive/                       # tools/train/archive.py 生成的每日归档
 ├── weight/                        # 训练好的 YOLO 权重
-├── tools/                         # 业务脚本（按阶段分组）
+├── tools/                         # 业务脚本（按阶段分组，仿 ultralytics 包结构）
+│   ├── __init__.py                #   顶层 API 导出
 │   ├── core/                      # 公共模块
 │   │   ├── constants.py           #   常量（DEFAULT_DATASET_PATH 等）
 │   │   ├── images.py              #   list_images 等
 │   │   ├── labelme.py             #   LabelMe JSON 扫描/读写
 │   │   ├── geometry.py            #   矩形/合并/距离工具
 │   │   └── __init__.py            #   统一对外导出
+│   ├── cfg/                       # 工作流配置（仿 ultralytics/cfg）
+│   │   ├── __init__.py            #   load_config / resolve_config / substitute_variables
+│   │   ├── default.yaml           #   系统默认（paths / parameters / log_file）
+│   │   ├── workflow.yaml          #   完整工作流 stage 定义
+│   │   └── workflow.example.yaml  #   给用户看的完整示例
+│   ├── engine/                    # 各 stage 聚合入口（仿 ultralytics/engine）
+│   │   └── __init__.py            #   re-export 10 个 stage 子包
 │   ├── annotate/                  # 标注阶段
 │   │   ├── auto.py                #   自动/自标注
 │   │   └── merge.py               #   框合并
@@ -72,9 +80,10 @@ cjet-vision-pipeline/
 │   ├── train/                     # 训练相关
 │   │   ├── archive.py             #   按时间戳归档
 │   │   └── create_tar_gz.py       #   压缩归档为 .tar.gz
-│   └── workflow.py                # 工作流编排器入口
+│   └── workflow.py                # 工作流编排器入口（薄编排，配置解析走 tools.cfg）
 ├── workflow.md                    # 工作流说明文档
-├── workflow_config.yaml.example   # 工作流配置示例
+├── workflow_config.yaml           # 项目级覆盖入口（与 tools/cfg/workflow.yaml 配合）
+├── workflow_config.yaml.example   # 迁移提示（指向 tools/cfg/）
 ├── requirements.txt               # 依赖清单
 ├── AGENTS.md                      # 本文件
 ```
@@ -276,15 +285,24 @@ if __name__ == "__main__" and __package__ in (None, ""):
 
 ### 5.3 跑整个工作流
 
+工作流配置在 `tools/cfg/` 下：
+- `tools/cfg/default.yaml`：系统默认（paths / parameters / log_file）
+- `tools/cfg/workflow.yaml`：完整 stage 定义
+- `tools/cfg/workflow.example.yaml`：可复制的完整示例
+- 项目根 `workflow_config.yaml`：项目级覆盖入口（与上面叠加使用）
+
 ```bash
-# 第一段：准备（跑到人工清洗检查点停）
+# 预览整条链路（不真跑）
+.conda\python.exe tools\workflow.py --config workflow_config.yaml --dry-run
+
+# 跑第零段（接续段：备份 + autolabel 接续 + JSON 修复 + 重命名）
+.conda\python.exe tools\workflow.py --config workflow_config.yaml --from-stage backup_snapshot --to-stage rename_with_labelme_sync
+
+# 跑第一段（准备段：到人工清洗检查点停）
 .conda\python.exe tools\workflow.py --config workflow_config.yaml --from-stage auto_annotate
 
-# 第二段：训练循环（人工清洗完后再跑）
+# 跑第二段（训练段：人工清洗完后再跑）
 .conda\python.exe tools\workflow.py --config workflow_config.yaml --from-stage select_subset
-
-# 预览整条链路，不真跑
-.conda\python.exe tools\workflow.py --config workflow_config.yaml --dry-run
 ```
 
 ### 5.4 测试

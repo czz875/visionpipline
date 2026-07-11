@@ -1,0 +1,49 @@
+# tools/cfg/default.yaml
+# 系统默认配置（ultralytics 风格）。
+# 项目里其它 yaml（tools/cfg/workflow.yaml、项目根的 workflow_config.yaml）
+# 会浅合并这份默认配置；同名 key 覆盖。
+
+project:
+  name: cjet_dataset
+  image_width: 1920
+  image_height: 1080
+
+paths:
+  raw_jpg: datasets/raw_jpg
+  raw_data: datasets/raw
+  ir_aug: datasets/raw_ir_aug
+  autolabel: datasets/autolabel
+  backup_dir: C:/Users/EDY/Pictures
+  behavior: datasets/behavior
+  annotated: datasets/01_annotated
+  cleaned: datasets/01_annotated
+  blurry_output: datasets/_blurry
+  high_quality: datasets/02_high_quality_30
+  remaining: datasets/02_remaining_70
+  yolo: datasets/yolo
+  model_dir: runs/train
+  self_annotated_labels: datasets/04_self_annotated_labels
+  labelme_final: datasets/05_labelme_final
+  archive: archive
+
+parameters:
+  merge_distance_x: 100
+  merge_distance_y: 200
+  max_merge_width: 600
+  max_merge_height: 600
+  blurry_threshold: 0.185
+  high_quality_ratio: 0.3
+  split_seed: 42
+  yolo_weights: yolov8n.pt
+  yolo_epochs: 100
+  jpg_to_png_threads: 16
+  jpg_to_png_compression: 9
+  tar_gz_level: 6
+  ir_aug_repeat: 3
+  ir_aug_workers: 8
+  ir_aug_local_classes: "all"
+  inherit_batch_size: 1000
+  snapshot_level: 6
+  yolo_classes: "phone,cigarette,face,hand"
+
+log_file: workflow.log
