@@ -9,6 +9,12 @@ tools/merge/inherit_dataset.py
 - 默认 **复制**（不动 autolabel 原文件），加 ``--move`` 才改为移动；
 - 默认 ``--dry-run``，加 ``--apply`` 才会真复制。
 
+通用增强（不破坏默认行为，向后兼容）：
+- ``--dedup``：按 ``target`` 下 PNG/JPG 的 basename 跳过已存在的对，避免重复写入；
+- ``--start-batches "0001,0002,0003,0004"``：把前 N*batch_size 张写到指定 batch 编号
+  （适合"补回缺失的早期 batch"），剩余从
+  ``max(start_batches 数字, target 现有最大)+1`` 接续。不指定时按 max+1 接续。
+
 归类规则（与 behavior/0022 现有分布对齐）：
 
     仅 face            -> only_head
@@ -23,6 +29,7 @@ tools/merge/inherit_dataset.py
 
 典型用法：
 
+    # 默认：autolabel → behavior，按 max+1 接续
     .conda\\python.exe tools\\merge\\inherit_dataset.py ^
         --source datasets\\autolabel ^
         --target datasets\\behavior ^
@@ -32,6 +39,15 @@ tools/merge/inherit_dataset.py
         --source datasets\\autolabel ^
         --target datasets\\behavior ^
         --batch-size 1000 ^
+        --apply
+
+    # 补回缺失的 0001-0004，剩余接续到 max+1，自动去重
+    .conda\\python.exe tools\\merge\\inherit_dataset.py ^
+        --source datasets\\yolo0708_labelme ^
+        --target datasets\\behavior ^
+        --batch-size 1000 ^
+        --start-batches 0001,0002,0003,0004 ^
+        --dedup ^
         --apply
 """
 
@@ -61,6 +77,9 @@ DEFAULT_TARGET_DIR = r"datasets\behavior"
 DEFAULT_BATCH_SIZE = 1000
 DEFAULT_DRY_RUN = True
 DEFAULT_MOVE = False
+DEFAULT_DEDUP = False  # 通用参数：按 target 下 PNG/JPG basename 去重
+DEFAULT_START_BATCHES: tuple[str, ...] = ()  # 通用参数：指定起始 batch 列表
+DEFAULT_DEDUP_EXTS: tuple[str, ...] = (".png", ".jpg", ".jpeg")
 
 # behavior 现有 8 个分类子目录（顺序无业务含义，仅用于建目录时排序）
 CATEGORY_DIRS: tuple[str, ...] = (
@@ -172,6 +191,47 @@ def chunk_pairs(pairs: list[Pair], batch_size: int) -> list[list[Pair]]:
     return [pairs[i : i + batch_size] for i in range(0, len(pairs), batch_size)]
 
 
+def collect_existing_stems(
+    target_dir: Path,
+    extensions: tuple[str, ...] = DEFAULT_DEDUP_EXTS,
+) -> set[str]:
+    """扫描 ``target_dir`` 下所有指定后缀的图片文件名 stem，用于去重判定。"""
+    stems: set[str] = set()
+    if not target_dir.is_dir():
+        return stems
+    ext_set = {ext.lower() for ext in extensions}
+    for p in target_dir.rglob("*"):
+        if p.is_file() and p.suffix.lower() in ext_set:
+            stems.add(p.stem)
+    return stems
+
+
+def chunk_with_start_batches(
+    pairs: list[Pair],
+    batch_size: int,
+    start_batches: tuple[str, ...],
+    existing_max_idx: int,
+) -> tuple[list[str], list[list[Pair]]]:
+    """按 ``start_batches`` 切分：前 N 个 batch 写到 ``start_batches[0..N-1]``，
+    剩余从 ``max(start_batches 数字, existing_max_idx) + 1`` 开始接续。"""
+    n_first = len(start_batches) * batch_size
+    first_part = pairs[:n_first]
+    rest_part = pairs[n_first:]
+
+    first_chunks: list[list[Pair]] = [
+        first_part[i * batch_size : (i + 1) * batch_size] for i in range(len(start_batches))
+    ]
+    rest_chunks: list[list[Pair]] = [
+        rest_part[i : i + batch_size] for i in range(0, len(rest_part), batch_size)
+    ]
+
+    start_idx = max(int(b) for b in start_batches) if start_batches else existing_max_idx
+    start_idx = max(start_idx, existing_max_idx) + 1
+    rest_batch_names = [f"{start_idx + i:04d}" for i in range(len(rest_chunks))]
+
+    return (list(start_batches) + rest_batch_names, first_chunks + rest_chunks)
+
+
 def inherit_dataset(
     source_dir: Path,
     target_dir: Path,
@@ -179,8 +239,17 @@ def inherit_dataset(
     batch_size: int = DEFAULT_BATCH_SIZE,
     dry_run: bool = DEFAULT_DRY_RUN,
     move: bool = DEFAULT_MOVE,
+    dedup: bool = DEFAULT_DEDUP,
+    start_batches: tuple[str, ...] = DEFAULT_START_BATCHES,
 ) -> list[dict]:
-    """执行接续，返回每个新 batch 的计划报告。"""
+    """执行接续，返回每个新 batch 的计划报告。
+
+    通用参数：
+    - ``dedup=True`` 时按 ``target_dir`` 下 PNG/JPG 的 basename 跳过已存在的对。
+    - ``start_batches=(b1, b2, ...)`` 时前 N*batch_size 张写到指定 batch（4 位数字），
+      剩余从 ``max(start_batches 数字, target_dir 现有最大 batch) + 1`` 接续。
+      不指定则按现有 max+1 接续（默认行为，向后兼容）。
+    """
     source_dir = source_dir.resolve()
     target_dir = target_dir.resolve()
 
@@ -194,8 +263,26 @@ def inherit_dataset(
         print(f"[警告] 源目录 {source_dir} 下没有 PNG 文件。")
         return []
 
-    start_idx = discover_max_batch(target_dir) + 1
-    batches = chunk_pairs(pairs, batch_size)
+    # 通用：去重
+    if dedup:
+        existing_stems = collect_existing_stems(target_dir)
+        before = len(pairs)
+        pairs = [p for p in pairs if p.image.stem not in existing_stems]
+        print(f"[去重] 跳过 {before - len(pairs)} 张已存在的图（target 下共 {len(existing_stems)} 个 stem）。")
+        if not pairs:
+            print("[完成] 去重后无剩余数据。")
+            return []
+
+    # 切分：start_batches 决定前 N 个 batch 的命名，剩余从 max+1 接续
+    existing_max_idx = discover_max_batch(target_dir)
+    if start_batches:
+        batch_names, batches = chunk_with_start_batches(
+            pairs, batch_size, start_batches, existing_max_idx
+        )
+    else:
+        start_idx = existing_max_idx + 1
+        batch_names = [f"{start_idx + i:04d}" for i in range(len(chunk_pairs(pairs, batch_size)))]
+        batches = chunk_pairs(pairs, batch_size)
 
     reports: list[dict] = []
     # 第一段进度：扫描 + 分类（dry-run 和 apply 都会跑，因为 classify 要读 JSON）
@@ -206,8 +293,7 @@ def inherit_dataset(
         disable=len(pairs) == 0,
     )
 
-    for offset, batch in enumerate(batches):
-        batch_name = f"{start_idx + offset:04d}"
+    for batch_name, batch in zip(batch_names, batches):
         batch_dir = target_dir / batch_name
         category_counter: Counter[str] = Counter()
         plan_items: list[tuple[Pair, Path, Path, str]] = []
@@ -291,6 +377,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="移动而不是复制（默认复制，autolabel 原文件保留）。",
     )
     parser.add_argument(
+        "--dedup",
+        action="store_true",
+        help="按 target 下 PNG/JPG 的 basename 跳过已存在的对（通用去重）。",
+    )
+    parser.add_argument(
+        "--start-batches",
+        type=str,
+        default="",
+        help=(
+            "逗号分隔的 4 位数字 batch 列表（如 0001,0002,0003,0004）。"
+            "指定后前 N*batch_size 张写到这些 batch，剩余从 max(start_batches 数字, target 现有最大)+1 接续。"
+            "不指定则按现有 max+1 接续（默认行为）。"
+        ),
+    )
+    parser.add_argument(
         "--apply",
         dest="dry_run",
         action="store_false",
@@ -304,6 +405,14 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
+    start_batches: tuple[str, ...] = tuple(
+        b.strip() for b in args.start_batches.split(",") if b.strip()
+    )
+    for b in start_batches:
+        if not (len(b) == 4 and b.isdigit()):
+            print(f"[错误] --start-batches 必须是 4 位数字字符串：{b}")
+            return 1
+
     try:
         reports = inherit_dataset(
             args.source,
@@ -311,6 +420,8 @@ def main() -> int:
             batch_size=args.batch_size,
             dry_run=args.dry_run,
             move=args.move,
+            dedup=args.dedup,
+            start_batches=start_batches,
         )
     except (FileNotFoundError, NotADirectoryError) as e:
         print(f"[错误] {e}")
