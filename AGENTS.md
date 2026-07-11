@@ -339,7 +339,99 @@ if __name__ == "__main__" and __package__ in (None, ""):
 
 ---
 
-## 8. 用户偏好
+## 8. Git 提交规范
+
+> **硬性要求：每次代码或文档变动都要做一次 `git commit`，不能攒到一起。**
+
+### 8.1 流程
+
+1. 改完代码或文档后，先 `git status --short` 探查实际改动文件。
+2. **精准 add**：用 `git add <具体文件>` 逐个添加（**不要** `git add -A` /
+   `git add .`，避免误把 `.env`、凭据、临时文件带进仓库）。
+3. 中文 commit message 先写到临时文件（推荐 `_commit_msg.txt`，已加进
+   `.gitignore`），再 `git commit -F _commit_msg.txt`。
+4. **不要** 改 `git config`（user.name / user.email 保持仓库原值）。
+5. 跑完 `git log --oneline -1` 确认提交成功。
+6. 验证乱码：PowerShell 默认 GBK，会把 commit message 显示成乱码。提交后用
+   `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8` 强制 UTF-8 即可
+   正常显示。仓库里存的 message 本身就是 UTF-8，无需重写。
+
+### 8.2 Commit message 格式
+
+遵循 [Conventional Commits](https://www.conventionalcommits.org/)，**标题与正文都用简体中文**：
+
+```text
+<type>(<scope>): <中文一句话标题，不超过 50 字>
+
+<正文段落，72 字换行，说明 "为什么" 而不是 "做了什么">
+- 改动点 1
+- 改动点 2
+```
+
+允许的 `type`：
+
+| type | 用途 |
+|---|---|
+| `feat` | 新功能 / 新脚本 / 新工作流 stage |
+| `fix` | 修 bug |
+| `refactor` | 重构（不改变行为） |
+| `perf` | 性能优化 |
+| `docs` | 仅文档（AGENTS.md / workflow.md 等） |
+| `test` | 测试相关 |
+| `chore` | 杂项（依赖、.gitignore、目录结构微调） |
+| `style` | 格式调整（不影响逻辑） |
+
+示例：
+
+```text
+feat: 新增 LabelMe JSON 修复脚本
+
+扫描并修复常见损坏：imagePath 指向已不存在的图片、矩形 points 拍平、
+x1>x2 / y1>y2、imageWidth/Height 与图片实际尺寸不一致、缺顶层字段。
+默认 dry-run，加 --apply 才会真改。
+
+- 新建 tools/label/fix_labelme.py
+- 默认递归扫描 --root 下的所有 *.json
+- 可选 --remove-orphan 删除缺同名图片的孤立 JSON
+```
+
+### 8.3 工作流命令速查
+
+```bash
+# 探查未提交改动
+git status --short
+
+# 精准 add（按文件）
+git add tools/merge/inherit_dataset.py workflow_config.yaml.example
+
+# 写 message 到文件（避免 PowerShell HEREDOC 解析失败）
+@'
+feat: 新增继承数据集脚本
+
+把 autolabel 按 1000/批接续到 behavior/0023/...
+'@ | Out-File -FilePath _commit_msg.txt -Encoding utf8
+
+# 提交
+git commit -F _commit_msg.txt
+
+# 验证（强制 UTF-8 解决 PowerShell 中文乱码）
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+git log --oneline -5
+```
+
+### 8.4 禁止事项
+
+- ❌ `git add -A` / `git add .`
+- ❌ `git config --global ...` 或任何改 `git config` 的命令
+- ❌ `git push`（除非用户明确说"push"）
+- ❌ `git commit --allow-empty`（无意义空提交）
+- ❌ 提交 `.env`、`*.key`、`*.pem`、`credentials.json` 等敏感文件
+- ❌ 提交 `datasets/`、`runs/`、`weight/`、`archive/`、`__pycache__/`、
+      `.conda/`（已在 `.gitignore` 里，但偶尔会绕过，遇到要主动排除）
+
+---
+
+## 9. 用户偏好
 
 来自 `user_profile.md`（摘录）：
 
