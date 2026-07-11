@@ -1,0 +1,46 @@
+# ===== 临时/缓存文件 =====
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.log
+workflow.log
+
+# 本会话的临时探针文件
+_*.py
+_*.txt
+_*.md
+.conda_envs_dir_test
+
+# ===== 便携式 Python 解释器（项目自带）=====
+.conda/
+
+# ===== 数据集（体积大、变化快，不入仓）=====
+datasets/
+# 例外：保留可能需要的元数据文件
+!datasets/.gitkeep
+
+# ===== YOLO 训练产物 =====
+runs/
+weight/
+archive/
+
+# ===== 编辑器/IDE =====
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ===== 操作系统/分发包 =====
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# ===== 业务无关的本地开发分支 =====
+src/
