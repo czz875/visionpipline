@@ -50,6 +50,7 @@ cjet-vision-pipeline/
 │   │   ├── __init__.py            #   load_config / resolve_config / substitute_variables
 │   │   ├── default.yaml           #   系统默认（paths / parameters / log_file）
 │   │   ├── workflow.yaml          #   系统主工作流 stage 定义
+│   │   ├── inherit_yolo.yaml      #   任务专项：接续 + 重命名 + 转 YOLO（走 stages_only）
 │   │   ├── workflow_config.yaml           #   项目级覆盖入口（默认入口）
 │   │   └── workflow_config.yaml.example   #   项目级覆盖示例
 │   ├── engine/                    # 各 stage 聚合入口（仿 ultralytics/engine）
@@ -292,22 +293,32 @@ if __name__ == "__main__" and __package__ in (None, ""):
 - `tools/cfg/workflow.yaml`：系统主工作流（20 个 stage）
 - `tools/cfg/workflow_config.yaml`：项目级覆盖入口（**默认入口**）
 - `tools/cfg/workflow_config.yaml.example`：项目级覆盖示例
+- `tools/cfg/inherit_yolo.yaml`：任务专项精简版（接续 + 重命名 + 转 YOLO，5 个 stage）
 
 `tools/workflow.py` 默认从 `tools/cfg/workflow_config.yaml` 加载，自动
 叠加 `default.yaml` + `workflow.yaml` + `workflow_config.yaml` 三层。
+
+**任务专项精简工作流**（`stages_only` 机制）：
+
+如果只想跑主工作流中的某几个 stage，在 project 顶层加 `stages_only: [name1, name2, ...]`
+字段即可——列出的 stage 按顺序从 `workflow.yaml` 拿完整定义，其它 stage 全部跳过。
+详见 `tools/cfg/inherit_yolo.yaml`。
 
 ```bash
 # 预览整条链路（不真跑）
 .conda\python.exe tools\workflow.py --dry-run
 
 # 跑第零段（接续段：备份 + autolabel 接续 + JSON 修复 + 重命名）
-.conda\python.exe tools\workflow.py --from-stage backup_snapshot --to-stage rename_with_labelme_sync
+.conda\python.exe tools\workflow.py --from-stage backup_snapshot --to-stage convert_to_yolo
 
 # 跑第一段（准备段：到人工清洗检查点停）
 .conda\python.exe tools\workflow.py --from-stage auto_annotate
 
 # 跑第二段（训练段：人工清洗完后再跑）
 .conda\python.exe tools\workflow.py --from-stage select_subset
+
+# 任务专项精简版（一键跑接续 + 重命名 + 转 YOLO，5 个 stage）
+.conda\python.exe tools\workflow.py --config tools\cfg\inherit_yolo.yaml
 
 # 显式指定其它入口（如直接跑系统主工作流，跳过项目覆盖）
 .conda\python.exe tools\workflow.py --config tools\cfg\workflow.yaml --dry-run

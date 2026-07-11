@@ -276,3 +276,34 @@ D:\PycharmProjects\cjet-vision-pipeline\.conda\python.exe tools\workflow.py --fr
 
 如果新增的脚本里有可复用的常量 / 函数（图片扫描、LabelMe 读写、几何工具等），
 优先放到 `tools/core/` 下，再由 `tools/core/__init__.py` 统一导出，保持「即插即用」。
+
+---
+
+## 任务专项精简工作流
+
+如果只想跑主工作流中的某几个 stage（比如补数据时只跑「备份 + 接续 + 重命名 + 转 YOLO」，
+跳过中间的「自动标注 / 合并 / 清洗 / 人工清洗 / 训练 / 自标注 / 归档」），
+
+在 project 顶层加 `stages_only` 字段，列出要跑的 stage name 即可：
+
+```yaml
+# tools/cfg/inherit_yolo.yaml
+stages_only:
+  - backup_snapshot
+  - inherit_dataset
+  - fix_labelme
+  - rename_with_labelme_sync
+  - convert_to_yolo
+```
+
+`resolve_config()` 看到 `stages_only` 字段后，会按列出的 name 顺序从
+`workflow.yaml` 拿对应 stage 的完整定义（带 command），其它 stage 全部跳过。
+
+跑法：
+
+```bash
+.conda\python.exe tools\workflow.py --config tools\cfg\inherit_yolo.yaml
+```
+
+如果需要覆盖 paths（备份目录 / autolabel / behavior），在同 yaml 加 `paths:` 段即可
+（不写就回退到 `tools/cfg/default.yaml` 里的默认值）。

@@ -45,7 +45,7 @@ from tools.cfg import (
 # tools/workflow.py 本身是被 .conda\python.exe 启动的，但 stage command 里的
 # `python` / `yolo` 命令走 shell PATH 查找。把 .conda 和 .conda\Scripts
 # 显式 prepend 到 os.environ["PATH"]，避免子进程 shell 找不到解释器
-# （同时让 ultralytics 装的 `yolo` CLI 也能找到）。
+# （同时让 ultralytics 装的 `yolo` CLI 也都能找到）。
 _CONDA_DIR = PROJECT_ROOT / ".conda"
 if _CONDA_DIR.is_dir() and sys.platform == "win32":
     for sub in ("", "Scripts"):

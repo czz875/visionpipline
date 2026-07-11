@@ -1,5 +1,6 @@
 """
 tools/cfg
+=========
 
 工作流配置加载、变量替换、合并逻辑（仿 ultralytics/cfg）。
 
@@ -13,12 +14,17 @@ tools/cfg
   返回合并后的 dict。
 - ``iter_stage_files()``：列出 ``tools/cfg/`` 下所有 ``*.yaml``（按字母序）
 
+``resolve_config`` 还支持在 project 顶层加 ``stages_only: [name1, name2, ...]``
+字段：列出的 stage 才会被跑（按顺序从 workflow.yaml 拿完整定义），其它 stage
+全部跳过。适合做"任务专项精简工作流"。
+
 典型用法：
 
     from tools.cfg import load_config, resolve_config
 
     cfg = load_config(Path("tools/cfg/workflow.yaml"))
     cfg = resolve_config(Path("workflow_config.yaml"))
+    cfg = resolve_config(Path("tools/cfg/inherit_yolo.yaml"))   # 走 stages_only
 """
 
 from __future__ import annotations
@@ -138,31 +144,52 @@ def resolve_config(project_path: Path | None = None) -> dict:
         project_path: 项目根下的覆盖 yaml，``None`` 时只加载前两份。
 
     Returns:
-        合并后的 dict，``stages`` 列表也会被合并（不去重）。
+        合并后的 dict，``stages`` 列表也会被合并。
+
+    stages 合并规则：
+    - project 顶层含 ``stages_only`` 字段：只跑列出的 stage（按顺序从
+      workflow.yaml 里拿对应完整定义），其它 stage 全部跳过。
+    - 否则按 stage name 去重拼接（先出现保留），这是默认行为。
     """
     layers: list[dict] = []
     if DEFAULT_CFG_PATH.exists():
         layers.append(load_config(DEFAULT_CFG_PATH))
     if WORKFLOW_CFG_PATH.exists():
         layers.append(load_config(WORKFLOW_CFG_PATH))
+    project_layer: dict = {}
     if project_path is not None:
         project_path = Path(project_path)
         if project_path.exists():
-            layers.append(load_config(project_path))
+            project_layer = load_config(project_path)
+            layers.append(project_layer)
 
     # dict 浅合并
     merged = merge_configs(*layers)
-    # stages 列表需要拼接（merge_configs 浅合并会被覆盖，所以手动拼）
-    stages: list[dict] = []
-    seen_stage_names: set[str] = set()
-    for layer in layers:
-        for stage in layer.get("stages", []) or []:
-            name = stage.get("name", "")
-            if name in seen_stage_names:
-                continue
-            stages.append(stage)
-            seen_stage_names.add(name)
-    merged["stages"] = stages
+
+    # stages 列表需要特殊处理（merge_configs 浅合并会被覆盖，所以手动拼）
+    if "stages_only" in project_layer:
+        # 按 project 列出的 name 顺序从所有 layer 拿 stage
+        stage_pool: dict[str, dict] = {}
+        for layer in layers:
+            for stage in layer.get("stages", []) or []:
+                name = stage.get("name", "")
+                if name and name not in stage_pool:
+                    stage_pool[name] = stage
+        merged["stages"] = [
+            dict(stage_pool[name]) for name in project_layer["stages_only"]
+            if name in stage_pool
+        ]
+    else:
+        stages: list[dict] = []
+        seen_stage_names: set[str] = set()
+        for layer in layers:
+            for stage in layer.get("stages", []) or []:
+                name = stage.get("name", "")
+                if name in seen_stage_names:
+                    continue
+                stages.append(stage)
+                seen_stage_names.add(name)
+        merged["stages"] = stages
     return merged
 
 

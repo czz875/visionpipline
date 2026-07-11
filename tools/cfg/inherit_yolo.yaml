@@ -1,0 +1,26 @@
+# tools/cfg/inherit_yolo.yaml
+# 接续 + 重命名 + 转 YOLO 一气呵成的精简工作流。
+# 用法：python tools/workflow.py --config tools/cfg/inherit_yolo.yaml
+#
+# resolve_config() 会自动叠加 default.yaml + workflow.yaml + 本文件。
+# 通过 stages_only 字段只跑这 5 个 stage，跳过 workflow.yaml 里的其他 15 个
+# （auto_annotate / merge_boxes / clean* / manual_review / select_subset /
+#  train_yolo / self_annotate / convert_back_labelme / final_clean /
+#  archive / create_tar_gz / jpg_to_png / ir_enhance）。
+#
+# 如果需要覆盖默认 paths（备份目录 / autolabel / behavior），取消注释
+# 下方 paths 段，按需修改。
+
+stages_only:
+  - backup_snapshot              # 备份 autolabel + behavior 到 backup_dir
+  - inherit_dataset              # autolabel → behavior，按 1000/批分子目录
+  - fix_labelme                  # 修复接续过程中可能损坏的 LabelMe JSON
+  - rename_with_labelme_sync     # 按时间戳改 PNG/JPG 名 + 同步 JSON imagePath
+  - convert_to_yolo              # 转 YOLO（9:1 划分 train/val）
+
+# paths 覆盖（可选；不写就走 tools/cfg/default.yaml 里的值）
+# paths:
+#   backup_dir: C:/Users/EDY/Pictures
+#   autolabel: datasets/autolabel
+#   behavior: datasets/behavior
+#   yolo: datasets/yolo
