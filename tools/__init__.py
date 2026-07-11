@@ -27,6 +27,7 @@ Python API 顶层导出（仿 ``from ultralytics import YOLO`` 风格）::
 from __future__ import annotations
 
 # Python API 顶层导出（仿 ultralytics 风格；不必再写 tools.<stage>.<script>.<api>）
+from tools import workflow
 from tools.backup.snapshot import snapshot_sources
 from tools.convert.labelme_to_yolo import convert_to_yolo
 from tools.label.fix_labelme import fix_root
