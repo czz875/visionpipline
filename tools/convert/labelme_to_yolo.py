@@ -241,7 +241,54 @@ def process_batch(
     print(f"  - 新转换: {converted} 个")
     print(f"  - 已存在跳过: {skipped} 个")
     for split_name, split_group in zip(splits, split_sets):
-        print(f"  - {split_name}: {len(split_group)} images")
+            print(f"  - {split_name}: {len(split_group)} images")
+
+
+def convert_to_yolo(
+    src: Path,
+    out: Path,
+    *,
+    class_names: list[str],
+    seed: int = DEFAULT_SEED,
+    force: bool = DEFAULT_FORCE,
+    dry_run: bool = False,
+) -> None:
+    """LabelMe → YOLO 的 Python API（与 CLI main() 行为一致）。
+
+    ``dry_run=True`` 时只 print 计划，不写盘。
+    """
+    src = src.resolve()
+    out_root = out.resolve()
+    if not src.is_dir():
+        raise FileNotFoundError(f"源目录不存在：{src}")
+
+    batches = discover_batches(src)
+    if not batches:
+        raise FileNotFoundError(f"在 {src} 下未找到任何 JSON 标注文件。")
+
+    print(f"源目录    ：{src}")
+    print(f"输出根目录：{out_root}")
+    print(f"类别      ：{class_names}")
+    print(f"检测到 {len(batches)} 个 batch：{', '.join(batches.keys())}")
+
+    if dry_run:
+        return
+
+    for batch_idx, (batch_name, json_files) in enumerate(batches.items()):
+        batch_out = out_root / batch_name
+        # "all" 虚拟 batch 用 SEED；其他 batch 用 SEED + idx 偏移
+        seed = DEFAULT_SEED if batch_name == "all" else DEFAULT_SEED + batch_idx
+        process_batch(
+            batch_name,
+            json_files,
+            batch_out,
+            seed=seed,
+            class_names=class_names,
+            force=force,
+        )
+
+    # 顶层写一个 names.txt 方便查看
+    (out_root / "names.txt").write_text("\n".join(class_names) + "\n", encoding="utf-8")
 
 
 # =============================================================================
@@ -291,39 +338,17 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
-    src = args.src.resolve()
-    out_root = args.out.resolve()
     class_names = [c.strip() for c in args.classes.split(",") if c.strip()]
-
-    if not src.is_dir():
-        print(f"[错误] 源目录不存在：{src}")
-        return 1
-
-    batches = discover_batches(src)
-    if not batches:
-        print(f"[错误] 在 {src} 下未找到任何 JSON 标注文件。")
-        return 1
-
-    print(f"源目录    ：{src}")
-    print(f"输出根目录：{out_root}")
-    print(f"类别      ：{class_names}")
-    print(f"检测到 {len(batches)} 个 batch：{', '.join(batches.keys())}")
-
-    for batch_idx, (batch_name, json_files) in enumerate(batches.items()):
-        batch_out = out_root / batch_name
-        # "all" 虚拟 batch 用 SEED；其他 batch 用 SEED + idx 偏移
-        seed = DEFAULT_SEED if batch_name == "all" else DEFAULT_SEED + batch_idx
-        process_batch(
-            batch_name,
-            json_files,
-            batch_out,
-            seed=seed,
+    try:
+        convert_to_yolo(
+            args.src,
+            args.out,
             class_names=class_names,
             force=args.force,
         )
-
-    # 顶层写一个 names.txt 方便查看
-    (out_root / "names.txt").write_text("\n".join(class_names) + "\n", encoding="utf-8")
+    except FileNotFoundError as e:
+        print(f"[错误] {e}")
+        return 1
     return 0
 
 
