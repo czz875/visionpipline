@@ -6,8 +6,7 @@
 #
 # tools/cfg/ 下完整配置结构：
 #   - default.yaml                  系统默认（paths / parameters / log_file）
-#   - workflow.yaml                 系统主工作流（17 个 stage）
-#   - workflow.example.yaml         系统主工作流完整示例
+#   - workflow.yaml                 系统主工作流（20 个 stage）
 #   - workflow_config.yaml          项目级覆盖入口（用户可改）
 #   - workflow_config.yaml.example  本文件
 #

@@ -170,7 +170,6 @@ __all__ = [
     "CFG_DIR",
     "DEFAULT_CFG_PATH",
     "DEFAULT_LOG",
-    "EXAMPLE_CFG_PATH",
     "PROJECT_CFG_PATH",
     "PROJECT_EXAMPLE_CFG_PATH",
     "PROJECT_ROOT",

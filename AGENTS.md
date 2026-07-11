@@ -49,8 +49,7 @@ cjet-vision-pipeline/
 │   ├── cfg/                       # 工作流配置（仿 ultralytics/cfg）
 │   │   ├── __init__.py            #   load_config / resolve_config / substitute_variables
 │   │   ├── default.yaml           #   系统默认（paths / parameters / log_file）
-│   │   ├── workflow.yaml          #   完整工作流 stage 定义
-│   │   ├── workflow.example.yaml  #   系统主工作流完整示例
+│   │   ├── workflow.yaml          #   系统主工作流 stage 定义
 │   │   ├── workflow_config.yaml           #   项目级覆盖入口（默认入口）
 │   │   └── workflow_config.yaml.example   #   项目级覆盖示例
 │   ├── engine/                    # 各 stage 聚合入口（仿 ultralytics/engine）
@@ -290,8 +289,7 @@ if __name__ == "__main__" and __package__ in (None, ""):
 工作流配置全部在 `tools/cfg/` 下，结构：
 
 - `tools/cfg/default.yaml`：系统默认（paths / parameters / log_file）
-- `tools/cfg/workflow.yaml`：系统主工作流（17 个 stage）
-- `tools/cfg/workflow.example.yaml`：系统主工作流完整示例
+- `tools/cfg/workflow.yaml`：系统主工作流（20 个 stage）
 - `tools/cfg/workflow_config.yaml`：项目级覆盖入口（**默认入口**）
 - `tools/cfg/workflow_config.yaml.example`：项目级覆盖示例
 

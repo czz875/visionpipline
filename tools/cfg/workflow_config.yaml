@@ -2,7 +2,6 @@
 # 完整配置在 tools/cfg/ 下，结构：
 #   - tools/cfg/default.yaml           系统默认（paths / parameters / log_file）
 #   - tools/cfg/workflow.yaml          系统主工作流（完整 stage 定义）
-#   - tools/cfg/workflow.example.yaml  系统主工作流的完整示例
 #   - tools/cfg/workflow_config.yaml   本文件：项目级覆盖入口
 #   - tools/cfg/workflow_config.yaml.example  本文件的示例
 #
