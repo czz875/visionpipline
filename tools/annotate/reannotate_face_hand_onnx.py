@@ -28,9 +28,9 @@ from tools.core import find_json_for_image, list_images, load_labelme, save_labe
 DEFAULT_FACE_MODEL = r"weight\yolov5s-lmk.onnx"
 DEFAULT_HAND_MODEL = r"weight\DNTC_Ariya_Gesture_HandDetect_20260205_640x640_fp32.onnx"
 DEFAULT_INPUT_ROOT = r"datasets\behavior"
-DEFAULT_START_BATCH = 23
-DEFAULT_END_BATCH = 37
-DEFAULT_MIN_FACE_RATIO = 0.05
+DEFAULT_START_BATCH = 22
+DEFAULT_END_BATCH = 23
+DEFAULT_MIN_FACE_RATIO = 0.01
 DEFAULT_FACE_CONF = 0.25
 DEFAULT_HAND_CONF = 0.25
 DEFAULT_FACE_IOU = 0.45
