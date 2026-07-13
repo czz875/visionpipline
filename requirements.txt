@@ -19,6 +19,8 @@ ultralytics
 # PyTorch（CPU 版本即可，按需替换为 CUDA 版本）
 torch
 torchvision
+# ONNX 模型推理
+onnxruntime
 
 # ---------- 图像 / 视频处理 ----------
 numpy
