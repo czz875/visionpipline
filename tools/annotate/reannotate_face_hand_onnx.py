@@ -1,7 +1,7 @@
 """
 tools/annotate/reannotate_face_hand_onnx.py
-使用两个 ONNX 模型重标注 behavior 批次中的 face / hand，
-并对过小人脸先做马赛克再删除对应框。
+使用人脸 ONNX 覆盖 face，保留现有 JSON 的 hand，
+并对过小框执行直接涂黑后删除的专项流程。
 """
 
 from __future__ import annotations
@@ -26,19 +26,22 @@ from tools.core import find_json_for_image, list_images, load_labelme, save_labe
 # =============================================================================
 
 DEFAULT_FACE_MODEL = r"weight\yolov5s-lmk.onnx"
-DEFAULT_HAND_MODEL = r"weight\DNTC_Ariya_Gesture_HandDetect_20260205_640x640_fp32.onnx"
+DEFAULT_SAM_HAND_MODEL = r"weight\sam3.1_multiplex.pt"
+DEFAULT_SAM_HAND_PROMPT = "hand"
+DEFAULT_HAND_MODEL = DEFAULT_SAM_HAND_MODEL
 DEFAULT_INPUT_ROOT = r"datasets\behavior"
-DEFAULT_START_BATCH = 22
-DEFAULT_END_BATCH = 23
+DEFAULT_START_BATCH = 23
+DEFAULT_END_BATCH = 37
 DEFAULT_MIN_FACE_RATIO = 0.01
+DEFAULT_MIN_HAND_RATIO = 0.01
 DEFAULT_FACE_CONF = 0.25
 DEFAULT_HAND_CONF = 0.25
 DEFAULT_FACE_IOU = 0.45
 DEFAULT_HAND_IOU = 0.45
-DEFAULT_MOSAIC_SIZE = 10
 DEFAULT_DRY_RUN = True
 DEFAULT_FACE_LABEL = "face"
 DEFAULT_HAND_LABEL = "hand"
+DEFAULT_KEEP_EXISTING_HAND = True
 
 
 # =============================================================================
@@ -51,7 +54,8 @@ class ProcessResult:
     image: np.ndarray
     boxes: np.ndarray
     labels: list[str]
-    mosaic_count: int
+    face_blackout_count: int
+    hand_blackout_count: int
     face_count: int
     hand_count: int
 
@@ -76,6 +80,15 @@ def classify_face_box(
     return (box_area / image_area) >= min_ratio
 
 
+def classify_box_by_ratio(
+    box: np.ndarray,
+    image_shape: tuple[int, int, int],
+    min_ratio: float,
+) -> bool:
+    """按面积占比判断框是否达到保留阈值。"""
+    return classify_face_box(box, image_shape, min_ratio)
+
+
 def clip_box(box: np.ndarray, image_shape: tuple[int, int, int]) -> np.ndarray:
     """把框裁剪到图像范围内。"""
     image_h, image_w = image_shape[:2]
@@ -92,27 +105,73 @@ def clip_box(box: np.ndarray, image_shape: tuple[int, int, int]) -> np.ndarray:
     return clipped
 
 
-def mosaic_region(
-    image: np.ndarray,
-    box: np.ndarray,
-    mosaic_size: int = DEFAULT_MOSAIC_SIZE,
-) -> np.ndarray:
-    """对框内区域做马赛克。"""
+def blackout_region(image: np.ndarray, box: np.ndarray) -> np.ndarray:
+    """把框内区域直接填充为纯黑。"""
     clipped = clip_box(box, image.shape)
     x1, y1, x2, y2 = [int(round(v)) for v in clipped.tolist()]
-    roi = image[y1:y2, x1:x2]
-    if roi.size == 0:
+    if x2 <= x1 or y2 <= y1:
         return image
-    small_w = max(1, roi.shape[1] // mosaic_size)
-    small_h = max(1, roi.shape[0] // mosaic_size)
-    small = cv2.resize(roi, (small_w, small_h), interpolation=cv2.INTER_LINEAR)
-    mosaic = cv2.resize(
-        small,
-        (roi.shape[1], roi.shape[0]),
-        interpolation=cv2.INTER_NEAREST,
-    )
-    image[y1:y2, x1:x2] = mosaic
+    image[y1:y2, x1:x2] = 0
     return image
+
+
+def subtract_box_regions(box: np.ndarray, keep_boxes: np.ndarray) -> np.ndarray:
+    """从待删除小框中减去所有保留大框重叠区域。"""
+    pieces = [clip_box(box, (10**9, 10**9, 3))]
+    for keep_box in keep_boxes:
+        next_pieces: list[np.ndarray] = []
+        for piece in pieces:
+            x1, y1, x2, y2 = [float(v) for v in piece.tolist()]
+            kx1, ky1, kx2, ky2 = [float(v) for v in keep_box.tolist()]
+            ix1 = max(x1, kx1)
+            iy1 = max(y1, ky1)
+            ix2 = min(x2, kx2)
+            iy2 = min(y2, ky2)
+            if ix2 <= ix1 or iy2 <= iy1:
+                next_pieces.append(piece)
+                continue
+            if y1 < iy1:
+                next_pieces.append(np.array([x1, y1, x2, iy1], dtype=np.float32))
+            if iy2 < y2:
+                next_pieces.append(np.array([x1, iy2, x2, y2], dtype=np.float32))
+            if x1 < ix1:
+                next_pieces.append(np.array([x1, iy1, ix1, iy2], dtype=np.float32))
+            if ix2 < x2:
+                next_pieces.append(np.array([ix2, iy1, x2, iy2], dtype=np.float32))
+        pieces = [piece for piece in next_pieces if piece[2] > piece[0] and piece[3] > piece[1]]
+        if not pieces:
+            return np.empty((0, 4), dtype=np.float32)
+    return np.array(pieces, dtype=np.float32) if pieces else np.empty((0, 4), dtype=np.float32)
+
+
+def collect_blackout_regions(
+    removed_boxes: np.ndarray,
+    kept_boxes: np.ndarray,
+) -> np.ndarray:
+    """收集所有待删除小框的非重叠残余区域。"""
+    regions: list[np.ndarray] = []
+    for removed_box in removed_boxes:
+        for piece in subtract_box_regions(removed_box, kept_boxes):
+            regions.append(piece)
+    return np.array(regions, dtype=np.float32) if regions else np.empty((0, 4), dtype=np.float32)
+
+
+def split_boxes_by_ratio(
+    boxes: np.ndarray,
+    image_shape: tuple[int, int, int],
+    min_ratio: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """按面积占比分成保留框与删除框。"""
+    kept: list[np.ndarray] = []
+    removed: list[np.ndarray] = []
+    for box in boxes:
+        if classify_box_by_ratio(box, image_shape, min_ratio):
+            kept.append(box)
+        else:
+            removed.append(box)
+    kept_array = np.array(kept, dtype=np.float32) if kept else np.empty((0, 4), dtype=np.float32)
+    removed_array = np.array(removed, dtype=np.float32) if removed else np.empty((0, 4), dtype=np.float32)
+    return kept_array, removed_array
 
 
 def build_labelme_shapes(boxes: np.ndarray, labels: list[str]) -> list[dict]:
@@ -152,6 +211,53 @@ def rewrite_labelme_dict(
     data["imageHeight"] = int(image_h)
     data["imageWidth"] = int(image_w)
     return data
+
+
+def extract_existing_label_boxes(json_path: Path, label: str) -> np.ndarray:
+    """从现有 LabelMe JSON 中提取指定标签的矩形框。"""
+    if not json_path.exists():
+        return np.empty((0, 4), dtype=np.float32)
+    data = load_labelme(json_path)
+    boxes: list[list[float]] = []
+    for shape in data.get("shapes", []):
+        if shape.get("label") != label:
+            continue
+        if shape.get("shape_type") != "rectangle":
+            continue
+        points = shape.get("points", [])
+        if len(points) < 2:
+            continue
+        (x1, y1), (x2, y2) = points[:2]
+        boxes.append([
+            float(min(x1, x2)),
+            float(min(y1, y2)),
+            float(max(x1, x2)),
+            float(max(y1, y2)),
+        ])
+    if not boxes:
+        return np.empty((0, 4), dtype=np.float32)
+    return np.array(boxes, dtype=np.float32)
+
+
+def extract_sam_boxes(results) -> np.ndarray:
+    """从 SAM3 结果中提取矩形框。"""
+    if not results:
+        return np.empty((0, 4), dtype=np.float32)
+
+    collected: list[np.ndarray] = []
+    for result in results:
+        boxes = getattr(result, "boxes", None)
+        xyxy = getattr(boxes, "xyxy", None)
+        if xyxy is None:
+            continue
+        array = np.asarray(xyxy, dtype=np.float32)
+        if array.size == 0:
+            continue
+        collected.append(array.reshape(-1, 4))
+
+    if not collected:
+        return np.empty((0, 4), dtype=np.float32)
+    return np.concatenate(collected, axis=0).astype(np.float32)
 
 
 # =============================================================================
@@ -196,6 +302,17 @@ def resolve_execution_providers(available_providers: list[str]) -> list[str]:
     if "CUDAExecutionProvider" in available_providers:
         return ["CUDAExecutionProvider", "CPUExecutionProvider"]
     return ["CPUExecutionProvider"]
+
+
+def get_available_execution_providers(ort_module) -> list[str]:
+    """先预加载 DLL，再获取当前环境可用的 provider。"""
+    preload_dlls = getattr(ort_module, "preload_dlls", None)
+    if callable(preload_dlls):
+        try:
+            preload_dlls()
+        except Exception as exc:
+            print(f"[警告] ONNX Runtime 预加载 CUDA DLL 失败：{exc}")
+    return ort_module.get_available_providers()
 
 
 def preprocess_image(
@@ -324,7 +441,9 @@ class OnnxDetector:
         self.model_path = model_path
         self.label = label
         self.conf = conf
-        self.providers = resolve_execution_providers(ort.get_available_providers())
+        self.providers = resolve_execution_providers(
+            get_available_execution_providers(ort)
+        )
         self.session = ort.InferenceSession(
             str(model_path),
             providers=self.providers,
@@ -335,7 +454,10 @@ class OnnxDetector:
         self.iou_threshold = (
             DEFAULT_FACE_IOU if label == DEFAULT_FACE_LABEL else DEFAULT_HAND_IOU
         )
-        print(f"[信息] {model_path.name} providers: {','.join(self.providers)}")
+        print(
+            f"[信息] {model_path.name} providers: "
+            f"{','.join(self.session.get_providers())}"
+        )
 
     def predict(self, image: np.ndarray) -> tuple[np.ndarray, list[str]]:
         """执行 ONNX 推理并返回框与标签。"""
@@ -365,9 +487,50 @@ class OnnxDetector:
         return boxes, labels
 
 
-# =============================================================================
-# 6. 单图处理
-# =============================================================================
+class SAMTextDetector:
+    """基于本地 SAM3 模型的文本 prompt 检测器。"""
+
+    def __init__(
+        self,
+        model_path: Path,
+        label: str,
+        conf: float,
+        prompt: str,
+        device: str | None = None,
+        predictor_cls=None,
+    ) -> None:
+        self.model_path = model_path
+        self.label = label
+        self.conf = conf
+        self.prompt = prompt
+        overrides = {
+            "conf": conf,
+            "task": "segment",
+            "mode": "predict",
+            "model": str(model_path),
+        }
+        if device:
+            overrides["device"] = device
+
+        if predictor_cls is None:
+            try:
+                from ultralytics.models.sam import SAM3SemanticPredictor
+            except ImportError as exc:
+                raise ImportError(
+                    "SAM3 文本 prompt 依赖 ultralytics.models.sam.SAM3SemanticPredictor，"
+                    "如缺少 CLIP 依赖，请安装 git+https://github.com/ultralytics/CLIP.git。"
+                ) from exc
+            predictor_cls = SAM3SemanticPredictor
+
+        self.predictor = predictor_cls(overrides=overrides)
+
+    def predict(self, image_path: Path) -> tuple[np.ndarray, list[str]]:
+        """按文本 prompt 执行 SAM3 分割，并返回外接矩形框。"""
+        self.predictor.set_image(image_path)
+        results = self.predictor(text=[self.prompt])
+        boxes = extract_sam_boxes(results)
+        labels = [self.label] * len(boxes)
+        return boxes, labels
 
 
 def combine_boxes(face_boxes: list[np.ndarray], hand_boxes: np.ndarray) -> np.ndarray:
@@ -398,41 +561,55 @@ def sanitize_boxes(boxes: np.ndarray, image_shape: tuple[int, int, int]) -> np.n
 def process_image_file(
     image_path: Path,
     face_detector: OnnxDetector,
-    hand_detector: OnnxDetector,
+    hand_detector: SAMTextDetector | None,
     min_face_ratio: float,
+    min_hand_ratio: float,
     dry_run: bool,
-    mosaic_size: int = DEFAULT_MOSAIC_SIZE,
+    keep_existing_hand: bool,
 ) -> ProcessResult:
     """对单张图片执行 face / hand 重标注。"""
     image = cv2.imread(str(image_path))
     if image is None:
         raise ValueError(f"无法读取图片：{image_path}")
 
+    json_path = find_json_for_image(image_path)
     face_boxes, _ = face_detector.predict(image)
-    hand_boxes, _ = hand_detector.predict(image)
+    if keep_existing_hand:
+        hand_boxes = extract_existing_label_boxes(json_path, DEFAULT_HAND_LABEL)
+    else:
+        if hand_detector is None:
+            raise ValueError("未提供手部检测器。")
+        hand_boxes, _ = hand_detector.predict(image_path)
+    face_boxes = sanitize_boxes(face_boxes, image.shape)
     hand_boxes = sanitize_boxes(hand_boxes, image.shape)
 
-    kept_face_boxes: list[np.ndarray] = []
-    mosaic_face_boxes: list[np.ndarray] = []
-    for face_box in face_boxes:
-        clipped_box = clip_box(face_box, image.shape)
-        if classify_face_box(clipped_box, image.shape, min_face_ratio):
-            kept_face_boxes.append(clipped_box)
-        else:
-            mosaic_face_boxes.append(clipped_box)
-            if not dry_run:
-                image = mosaic_region(image, clipped_box, mosaic_size=mosaic_size)
+    kept_faces, removed_faces = split_boxes_by_ratio(
+        face_boxes, image.shape, min_face_ratio
+    )
+    kept_hands, removed_hands = split_boxes_by_ratio(
+        hand_boxes, image.shape, min_hand_ratio
+    )
 
-    final_boxes = combine_boxes(kept_face_boxes, hand_boxes)
-    final_labels = [DEFAULT_FACE_LABEL] * len(kept_face_boxes)
-    final_labels.extend([DEFAULT_HAND_LABEL] * len(hand_boxes))
+    face_blackouts = collect_blackout_regions(removed_faces, kept_faces)
+    hand_blackouts = collect_blackout_regions(removed_hands, kept_hands)
+
+    if not dry_run:
+        for box in face_blackouts:
+            image = blackout_region(image, box)
+        for box in hand_blackouts:
+            image = blackout_region(image, box)
+
+    final_boxes = combine_boxes(list(kept_faces), kept_hands)
+    final_labels = [DEFAULT_FACE_LABEL] * len(kept_faces)
+    final_labels.extend([DEFAULT_HAND_LABEL] * len(kept_hands))
     return ProcessResult(
         image=image,
         boxes=final_boxes,
         labels=final_labels,
-        mosaic_count=len(mosaic_face_boxes),
-        face_count=len(kept_face_boxes),
-        hand_count=len(hand_boxes),
+        face_blackout_count=len(face_blackouts),
+        hand_blackout_count=len(hand_blackouts),
+        face_count=len(kept_faces),
+        hand_count=len(kept_hands),
     )
 
 
@@ -444,7 +621,7 @@ def process_image_file(
 def build_parser() -> argparse.ArgumentParser:
     """构造命令行参数。"""
     parser = argparse.ArgumentParser(
-        description="用两个 ONNX 模型重标注 behavior 批次中的 face / hand。",
+        description="用人脸 ONNX 覆盖 face，并保留现有 JSON 中的 hand 进行小框涂黑过滤。",
     )
     parser.add_argument(
         "--face-model",
@@ -456,7 +633,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--hand-model",
         type=Path,
         default=Path(DEFAULT_HAND_MODEL),
-        help=f"手部 ONNX 模型路径（默认：{DEFAULT_HAND_MODEL}）。",
+        help=f"保留兼容性的手部模型参数（默认：{DEFAULT_HAND_MODEL}）。",
     )
     parser.add_argument(
         "--input-root",
@@ -492,13 +669,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--hand-conf",
         type=float,
         default=DEFAULT_HAND_CONF,
-        help=f"手部置信度阈值（默认：{DEFAULT_HAND_CONF}）。",
+        help=f"保留兼容性的手部阈值参数（默认：{DEFAULT_HAND_CONF}）。",
     )
     parser.add_argument(
-        "--mosaic-size",
-        type=int,
-        default=DEFAULT_MOSAIC_SIZE,
-        help=f"马赛克缩小倍数（默认：{DEFAULT_MOSAIC_SIZE}）。",
+        "--min-hand-ratio",
+        type=float,
+        default=DEFAULT_MIN_HAND_RATIO,
+        help=f"保留手部的最小面积占比（默认：{DEFAULT_MIN_HAND_RATIO}）。",
+    )
+    parser.add_argument(
+        "--keep-existing-hand",
+        action="store_true",
+        default=DEFAULT_KEEP_EXISTING_HAND,
+        help="直接保留现有 JSON 里的 hand 矩形框，不调用 hand 模型。",
     )
     parser.add_argument(
         "--apply",
@@ -518,7 +701,14 @@ def run(args: argparse.Namespace) -> int:
         return 1
 
     face_detector = OnnxDetector(args.face_model, DEFAULT_FACE_LABEL, args.face_conf)
-    hand_detector = OnnxDetector(args.hand_model, DEFAULT_HAND_LABEL, args.hand_conf)
+    hand_detector = None
+    if not args.keep_existing_hand:
+        hand_detector = SAMTextDetector(
+            model_path=args.hand_model,
+            label=DEFAULT_HAND_LABEL,
+            conf=args.hand_conf,
+            prompt=args.hand_prompt,
+        )
 
     total_face = 0
     total_hand = 0
@@ -531,12 +721,13 @@ def run(args: argparse.Namespace) -> int:
             face_detector=face_detector,
             hand_detector=hand_detector,
             min_face_ratio=args.min_face_ratio,
+            min_hand_ratio=args.min_hand_ratio,
             dry_run=args.dry_run,
-            mosaic_size=args.mosaic_size,
+            keep_existing_hand=args.keep_existing_hand,
         )
         total_face += result.face_count
         total_hand += result.hand_count
-        total_mosaic += result.mosaic_count
+        total_mosaic += result.face_blackout_count + result.hand_blackout_count
         total_json += 1
 
         if args.dry_run:
@@ -557,7 +748,7 @@ def run(args: argparse.Namespace) -> int:
     print(f"[{mode}] 图片数：{len(image_paths)}")
     print(f"[{mode}] 保留 face：{total_face}")
     print(f"[{mode}] 保留 hand：{total_hand}")
-    print(f"[{mode}] 小脸马赛克并删除：{total_mosaic}")
+    print(f"[{mode}] 小框涂黑并删除：{total_mosaic}")
     print(f"[{mode}] 覆盖 JSON：{total_json}")
     return 0
 
