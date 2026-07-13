@@ -47,3 +47,4 @@ venv/
 # ===== 业务无关的本地开发分支 =====
 src/
 docs/
+.worktrees/
