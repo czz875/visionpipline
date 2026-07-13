@@ -93,7 +93,7 @@ def run_stage(
         print("    (dry-run，未实际执行)")
         return True
 
-    result = subprocess.run(command, shell=True)
+    result = subprocess.run(command, shell=True, cwd=PROJECT_ROOT)
     if result.returncode != 0:
         print(f"    [失败] 阶段 {name} 返回码 {result.returncode}")
         with log_path.open("a", encoding="utf-8") as log:

@@ -23,7 +23,7 @@ from tqdm import tqdm
 # sys.path 之后再延迟导入 supervision 与 ultralytics，避免在 --help 阶段
 # 触发昂贵的依赖加载。
 if __name__ == "__main__" and __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 
 # =============================================================================
