@@ -8,6 +8,9 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
 from tools.annotate.reannotate_face_hand_onnx import (
+    DEFAULT_END_BATCH,
+    DEFAULT_MIN_FACE_RATIO,
+    DEFAULT_START_BATCH,
     build_labelme_shapes,
     classify_face_box,
     mosaic_region,
@@ -80,3 +83,9 @@ def test_resolve_execution_providers_falls_back_to_cpu() -> None:
     providers = resolve_execution_providers(["CPUExecutionProvider"])
 
     assert providers == ["CPUExecutionProvider"]
+
+
+def test_default_batch_range_and_face_ratio() -> None:
+    assert DEFAULT_START_BATCH == 22
+    assert DEFAULT_END_BATCH == 23
+    assert DEFAULT_MIN_FACE_RATIO == 0.01
