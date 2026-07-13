@@ -16,6 +16,8 @@ cleanvision
 # ---------- 训练 / 推理（推荐） ----------
 # YOLOv8 系列训练与推理
 ultralytics
+# SAM3 文本 prompt 依赖（ultralytics 会在缺失时尝试自动安装）
+git+https://github.com/ultralytics/CLIP.git
 # PyTorch（CPU 版本即可，按需替换为 CUDA 版本）
 torch
 torchvision
