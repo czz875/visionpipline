@@ -11,6 +11,7 @@ from tools.annotate.reannotate_face_hand_onnx import (
     build_labelme_shapes,
     classify_face_box,
     mosaic_region,
+    resolve_execution_providers,
     rewrite_labelme_dict,
 )
 
@@ -65,3 +66,17 @@ def test_rewrite_labelme_dict_discards_old_phone_and_cigarette(tmp_path: Path) -
 
     assert [shape["label"] for shape in updated["shapes"]] == ["face"]
     assert updated["imagePath"] == "sample.png"
+
+
+def test_resolve_execution_providers_prefers_cuda() -> None:
+    providers = resolve_execution_providers(
+        ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    )
+
+    assert providers == ["CUDAExecutionProvider", "CPUExecutionProvider"]
+
+
+def test_resolve_execution_providers_falls_back_to_cpu() -> None:
+    providers = resolve_execution_providers(["CPUExecutionProvider"])
+
+    assert providers == ["CPUExecutionProvider"]

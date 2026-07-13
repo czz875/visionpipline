@@ -191,6 +191,13 @@ def resolve_input_size(shape: list[int | str | None]) -> tuple[int, int]:
     return 640, 640
 
 
+def resolve_execution_providers(available_providers: list[str]) -> list[str]:
+    """优先使用 CUDA，不可用时回退到 CPU。"""
+    if "CUDAExecutionProvider" in available_providers:
+        return ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    return ["CPUExecutionProvider"]
+
+
 def preprocess_image(
     image: np.ndarray,
     input_size: tuple[int, int],
@@ -317,9 +324,10 @@ class OnnxDetector:
         self.model_path = model_path
         self.label = label
         self.conf = conf
+        self.providers = resolve_execution_providers(ort.get_available_providers())
         self.session = ort.InferenceSession(
             str(model_path),
-            providers=["CPUExecutionProvider"],
+            providers=self.providers,
         )
         self.input_name = self.session.get_inputs()[0].name
         self.input_size = resolve_input_size(self.session.get_inputs()[0].shape)
@@ -327,6 +335,7 @@ class OnnxDetector:
         self.iou_threshold = (
             DEFAULT_FACE_IOU if label == DEFAULT_FACE_LABEL else DEFAULT_HAND_IOU
         )
+        print(f"[信息] {model_path.name} providers: {','.join(self.providers)}")
 
     def predict(self, image: np.ndarray) -> tuple[np.ndarray, list[str]]:
         """执行 ONNX 推理并返回框与标签。"""
