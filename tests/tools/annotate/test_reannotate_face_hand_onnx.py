@@ -11,6 +11,7 @@ from tools.annotate.reannotate_face_hand_onnx import (
     build_labelme_shapes,
     classify_face_box,
     mosaic_region,
+    rewrite_labelme_dict,
 )
 
 
@@ -40,3 +41,27 @@ def test_mosaic_region_changes_pixels_inside_box() -> None:
     result = mosaic_region(image.copy(), box)
 
     assert np.any(result[8:24, 8:24] != image[8:24, 8:24])
+
+
+def test_rewrite_labelme_dict_discards_old_phone_and_cigarette(tmp_path: Path) -> None:
+    json_path = tmp_path / "sample.json"
+    json_path.write_text(
+        (
+            '{"shapes":['
+            '{"label":"phone","points":[[0,0],[1,1]],"shape_type":"rectangle"},'
+            '{"label":"cigarette","points":[[1,1],[2,2]],"shape_type":"rectangle"}'
+            '],"imagePath":"sample.png","imageHeight":100,"imageWidth":100}'
+        ),
+        encoding="utf-8",
+    )
+
+    updated = rewrite_labelme_dict(
+        json_path=json_path,
+        boxes=np.array([[2, 2, 10, 10]], dtype=np.float32),
+        labels=["face"],
+        image_shape=(100, 100, 3),
+        image_name="sample.png",
+    )
+
+    assert [shape["label"] for shape in updated["shapes"]] == ["face"]
+    assert updated["imagePath"] == "sample.png"

@@ -16,7 +16,7 @@ import numpy as np
 from tqdm import tqdm
 
 if __name__ == "__main__" and __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from tools.core import find_json_for_image, list_images, load_labelme, save_labelme
 
@@ -33,6 +33,8 @@ DEFAULT_END_BATCH = 37
 DEFAULT_MIN_FACE_RATIO = 0.05
 DEFAULT_FACE_CONF = 0.25
 DEFAULT_HAND_CONF = 0.25
+DEFAULT_FACE_IOU = 0.45
+DEFAULT_HAND_IOU = 0.45
 DEFAULT_MOSAIC_SIZE = 10
 DEFAULT_DRY_RUN = True
 DEFAULT_FACE_LABEL = "face"
@@ -134,6 +136,7 @@ def rewrite_labelme_dict(
     boxes: np.ndarray,
     labels: list[str],
     image_shape: tuple[int, int, int],
+    image_name: str,
 ) -> dict:
     """用新的人脸与手部框整体覆盖 LabelMe。"""
     if json_path.exists():
@@ -144,7 +147,7 @@ def rewrite_labelme_dict(
     data["version"] = data.get("version", "5.3.1")
     data["flags"] = data.get("flags", {})
     data["shapes"] = build_labelme_shapes(boxes, labels)
-    data["imagePath"] = json_path.with_suffix(".png").name
+    data["imagePath"] = image_name
     data["imageData"] = None
     data["imageHeight"] = int(image_h)
     data["imageWidth"] = int(image_w)
@@ -170,29 +173,187 @@ def iter_image_files(root: Path, start_batch: int, end_batch: int) -> list[Path]
     """收集指定 batch 范围内的全部图片。"""
     image_paths: list[Path] = []
     for batch_dir in iter_batch_dirs(root, start_batch, end_batch):
-        image_paths.extend(list_images(batch_dir, recursive=False))
+        image_paths.extend(list_images(batch_dir, recursive=True))
     return image_paths
 
 
 # =============================================================================
-# 5. ONNX 适配占位
+# 5. ONNX 适配
 # =============================================================================
 
 
+def resolve_input_size(shape: list[int | str | None]) -> tuple[int, int]:
+    """从 ONNX 输入 shape 里解析输入宽高。"""
+    if len(shape) >= 4:
+        input_h = int(shape[2] or 640)
+        input_w = int(shape[3] or 640)
+        return input_w, input_h
+    return 640, 640
+
+
+def preprocess_image(
+    image: np.ndarray,
+    input_size: tuple[int, int],
+    *,
+    normalize: bool,
+) -> np.ndarray:
+    """按模型输入尺寸直接缩放，并按模型要求决定是否归一化。"""
+    input_w, input_h = input_size
+    resized = cv2.resize(image, (input_w, input_h))
+    resized = resized.astype(np.float32)
+    if normalize:
+        resized /= 255.0
+    tensor = np.transpose(resized, (2, 0, 1))[None, ...]
+    return tensor
+
+
+def xywh_to_xyxy(boxes: np.ndarray) -> np.ndarray:
+    """把中心点格式的 xywh 转成 xyxy。"""
+    if len(boxes) == 0:
+        return np.empty((0, 4), dtype=np.float32)
+    centers_x = boxes[:, 0]
+    centers_y = boxes[:, 1]
+    widths = boxes[:, 2]
+    heights = boxes[:, 3]
+    converted = np.stack(
+        [
+            centers_x - widths / 2.0,
+            centers_y - heights / 2.0,
+            centers_x + widths / 2.0,
+            centers_y + heights / 2.0,
+        ],
+        axis=1,
+    )
+    return converted.astype(np.float32)
+
+
+def scale_boxes(
+    boxes: np.ndarray,
+    image_shape: tuple[int, int, int],
+    input_size: tuple[int, int],
+) -> np.ndarray:
+    """把输入尺度上的框映射回原图尺度。"""
+    if len(boxes) == 0:
+        return np.empty((0, 4), dtype=np.float32)
+    image_h, image_w = image_shape[:2]
+    input_w, input_h = input_size
+    scaled = boxes.copy().astype(np.float32)
+    scaled[:, [0, 2]] *= image_w / float(input_w)
+    scaled[:, [1, 3]] *= image_h / float(input_h)
+    return scaled
+
+
+def apply_nms(boxes: np.ndarray, scores: np.ndarray, iou_threshold: float) -> np.ndarray:
+    """对检测框做 NMS，返回保留索引。"""
+    if len(boxes) == 0:
+        return np.empty((0,), dtype=int)
+    nms_boxes = [
+        [
+            float(box[0]),
+            float(box[1]),
+            float(box[2] - box[0]),
+            float(box[3] - box[1]),
+        ]
+        for box in boxes
+    ]
+    kept = cv2.dnn.NMSBoxes(
+        bboxes=nms_boxes,
+        scores=scores.astype(float).tolist(),
+        score_threshold=0.0,
+        nms_threshold=iou_threshold,
+    )
+    if len(kept) == 0:
+        return np.empty((0,), dtype=int)
+    kept_indices = np.array(kept).reshape(-1).astype(int)
+    return kept_indices
+
+
+def decode_face_outputs(
+    outputs: list[np.ndarray],
+    image_shape: tuple[int, int, int],
+    input_size: tuple[int, int],
+    conf_threshold: float,
+    iou_threshold: float,
+) -> np.ndarray:
+    """解码人脸模型输出。"""
+    rows = outputs[0][0]
+    scores = rows[:, 4] * rows[:, 15]
+    keep = scores >= conf_threshold
+    if not np.any(keep):
+        return np.empty((0, 4), dtype=np.float32)
+    boxes = xywh_to_xyxy(rows[keep, :4])
+    scores = scores[keep]
+    boxes = scale_boxes(boxes, image_shape, input_size)
+    kept_indices = apply_nms(boxes, scores, iou_threshold)
+    return boxes[kept_indices]
+
+
+def decode_hand_outputs(
+    outputs: list[np.ndarray],
+    image_shape: tuple[int, int, int],
+    input_size: tuple[int, int],
+    conf_threshold: float,
+    iou_threshold: float,
+) -> np.ndarray:
+    """解码手部模型输出。"""
+    rows = outputs[0][0].transpose(1, 0)
+    scores = rows[:, 4]
+    keep = scores >= conf_threshold
+    if not np.any(keep):
+        return np.empty((0, 4), dtype=np.float32)
+    boxes = xywh_to_xyxy(rows[keep, :4])
+    scores = scores[keep]
+    boxes = scale_boxes(boxes, image_shape, input_size)
+    kept_indices = apply_nms(boxes, scores, iou_threshold)
+    return boxes[kept_indices]
+
+
 class OnnxDetector:
-    """ONNX 检测器占位实现。"""
+    """ONNX 检测器。"""
 
     def __init__(self, model_path: Path, label: str, conf: float) -> None:
+        import onnxruntime as ort
+
         self.model_path = model_path
         self.label = label
         self.conf = conf
-        self.session = None
-        self.input_name = ""
+        self.session = ort.InferenceSession(
+            str(model_path),
+            providers=["CPUExecutionProvider"],
+        )
+        self.input_name = self.session.get_inputs()[0].name
+        self.input_size = resolve_input_size(self.session.get_inputs()[0].shape)
+        self.normalize = label == DEFAULT_FACE_LABEL
+        self.iou_threshold = (
+            DEFAULT_FACE_IOU if label == DEFAULT_FACE_LABEL else DEFAULT_HAND_IOU
+        )
 
     def predict(self, image: np.ndarray) -> tuple[np.ndarray, list[str]]:
-        """占位预测，后续接入真实 ONNX 推理。"""
-        del image
-        return np.empty((0, 4), dtype=np.float32), []
+        """执行 ONNX 推理并返回框与标签。"""
+        tensor = preprocess_image(
+            image,
+            self.input_size,
+            normalize=self.normalize,
+        )
+        outputs = self.session.run(None, {self.input_name: tensor})
+        if self.label == DEFAULT_FACE_LABEL:
+            boxes = decode_face_outputs(
+                outputs=outputs,
+                image_shape=image.shape,
+                input_size=self.input_size,
+                conf_threshold=self.conf,
+                iou_threshold=self.iou_threshold,
+            )
+        else:
+            boxes = decode_hand_outputs(
+                outputs=outputs,
+                image_shape=image.shape,
+                input_size=self.input_size,
+                conf_threshold=self.conf,
+                iou_threshold=self.iou_threshold,
+            )
+        labels = [self.label] * len(boxes)
+        return boxes, labels
 
 
 # =============================================================================
@@ -212,6 +373,19 @@ def combine_boxes(face_boxes: list[np.ndarray], hand_boxes: np.ndarray) -> np.nd
     return np.concatenate(parts, axis=0)
 
 
+def sanitize_boxes(boxes: np.ndarray, image_shape: tuple[int, int, int]) -> np.ndarray:
+    """裁剪并过滤无效框。"""
+    sanitized: list[np.ndarray] = []
+    for box in boxes:
+        clipped = clip_box(box, image_shape)
+        if clipped[2] <= clipped[0] or clipped[3] <= clipped[1]:
+            continue
+        sanitized.append(clipped)
+    if not sanitized:
+        return np.empty((0, 4), dtype=np.float32)
+    return np.array(sanitized, dtype=np.float32)
+
+
 def process_image_file(
     image_path: Path,
     face_detector: OnnxDetector,
@@ -227,6 +401,7 @@ def process_image_file(
 
     face_boxes, _ = face_detector.predict(image)
     hand_boxes, _ = hand_detector.predict(image)
+    hand_boxes = sanitize_boxes(hand_boxes, image.shape)
 
     kept_face_boxes: list[np.ndarray] = []
     mosaic_face_boxes: list[np.ndarray] = []
@@ -359,7 +534,13 @@ def run(args: argparse.Namespace) -> int:
             continue
 
         json_path = find_json_for_image(image_path)
-        data = rewrite_labelme_dict(json_path, result.boxes, result.labels, result.image.shape)
+        data = rewrite_labelme_dict(
+            json_path,
+            result.boxes,
+            result.labels,
+            result.image.shape,
+            image_path.name,
+        )
         cv2.imwrite(str(image_path), result.image)
         save_labelme(data, json_path)
 
