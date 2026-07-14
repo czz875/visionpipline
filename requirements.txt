@@ -4,35 +4,53 @@
 #   .conda\python.exe -m pip install -r requirements.txt
 #
 # 安装后建议再跑一次冒烟测试：
-#   .conda\python.exe -c "import supervision, cleanvision; print(supervision.__version__, cleanvision.__version__)"
+#   .conda\python.exe -c "import supervision, cleanvision, ultralytics; print(supervision.__version__, cleanvision.__version__, ultralytics.__version__)"
+#
+# 版本说明：下方版本均为本机已验证可运行的组合（2026-07-14 核验）。
+#   - PyTorch 钉的是 PyPI 默认（CPU）版本；本机实际用的是 CUDA 12.x
+#     构建（torch 2.11.0+cu130），如需 CUDA 版见“PyTorch”段注释中的命令。
+#   - SAM3 文本提示标注走 ultralytics 的 SAM3SemanticPredictor，仅依赖
+#     CLIP（从 ultralytics 仓库安装，提供 `clip` 包）；权重为本地文件
+#     weight/sam3.1_multiplex.pt（不走 PyPI，需自行放置）。不需要
+#     transformers —— 那是旧的 facebook/sam3(HF) 方案遗留，现已弃用。
+#   - LabelMe 导出由 tools.core 自行实现（supervision 0.29.x 缺失
+#     dataset.formats.labelme 模块），无需额外依赖。
 # =============================================================================
 
 # ---------- 核心依赖（项目运行时必须） ----------
 # 自动标注 / 几何 / 数据集封装都依赖它
-supervision
+supervision==0.29.1
 # 模糊目标检测（tools/clean/blurry.py 依赖）
-cleanvision
+cleanvision==0.3.7
 
 # ---------- 训练 / 推理（推荐） ----------
-# YOLOv8 系列训练与推理
-ultralytics
-# SAM3 文本 prompt 依赖（ultralytics 会在缺失时尝试自动安装）
+# YOLOv8 系列训练与推理；同时提供 SAM3 的 SAM3SemanticPredictor
+ultralytics==8.4.86
+# SAM3 文本提示依赖：ultralytics 的 SAM3SemanticPredictor 需要 CLIP。
+# CLIP 不在 PyPI，从 ultralytics 维护的仓库安装（安装后提供 `clip` 包）。
 git+https://github.com/ultralytics/CLIP.git
-# PyTorch（CPU 版本即可，按需替换为 CUDA 版本）
-torch
-torchvision
-# ONNX 模型推理
-onnxruntime
+
+# ---------- PyTorch ----------
+# PyPI 默认是 CPU 构建，钉版本以保证可复现：
+torch==2.11.0
+torchvision==0.26.0
+# 如需 CUDA 12.x 构建（本机即用此版，推理更快），改用 pytorch 官方源安装：
+#   .conda\python.exe -m pip install torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cu130
+
+# ---------- ONNX 推理 ----------
+# 手部 / 人脸 ONNX 检测器（tools/annotate/reannotate_face_hand_onnx.py）使用；
+# GPU 版优先，无 CUDA 环境时改为 onnxruntime。
+onnxruntime-gpu==1.27.0
 
 # ---------- 图像 / 视频处理 ----------
-numpy
-opencv-python
-Pillow
+numpy==2.4.4
+opencv-python==5.0.0.93
+Pillow==12.2.0
 
 # ---------- 工作流 / 工具 ----------
-# tqdm 进度条（tools/annotate/auto.py 等使用）
-tqdm
+# 进度条（tools/annotate/auto.py 等使用）
+tqdm==4.68.4
 # 读取 workflow_config.yaml 必需
-PyYAML
+PyYAML==6.0.3
 # COCO 标注转换可选依赖
-pycocotools
+pycocotools==2.0.11

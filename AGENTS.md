@@ -241,6 +241,21 @@ if __name__ == "__main__" and __package__ in (None, ""):
     --output datasets\01_annotated ^
     --format labelme
 
+# 新工作流1：SAM 标 hand + yolov5s-lmk.onnx 标 face，LabelMe 输出；
+# 面积<1% 的小框打马赛克后删除，重叠保留大框的部分不打码（默认预览）
+.conda\python.exe tools\annotate\auto_hand_face.py ^
+    --source datasets\raw ^
+    --output datasets\01_annotated_hand_face ^
+    --min-ratio 0.01 --mosaic-block 16
+.conda\python.exe tools\annotate\auto_hand_face.py ^
+    --source datasets\raw ^
+    --output datasets\01_annotated_hand_face ^
+    --min-ratio 0.01 --mosaic-block 16 --apply
+
+# 该工作流也支持用 tools/workflow.py 跑（临时 cfg 在 src/，不入 git）：
+#   python -m tools.workflow --config src\hand_face_mosaic.yaml --dry-run
+#   python -m tools.workflow --config src\hand_face_mosaic.yaml
+
 # 框合并
 .conda\python.exe tools\annotate\merge.py ^
     --json-dir datasets\01_annotated ^
@@ -358,17 +373,30 @@ python -m tools.workflow --config src\recover_yolo0708.yaml --from-stage inherit
 
 ### 5.4 测试
 
+> 测试统一收在 `tests/` 下：`tests/` 根目录放独立测试（如 `test_torch_cuda.py` 校验
+> torch/CUDA、`test_reannotate_face_hand_onnx.py` 校验 onnxruntime 能否在 CPU/GPU 上
+> 真实推理），`tests/tools/<stage>/` 放按阶段归类的测试。pytest 递归收集，
+> 直接跑 `tests/` 即可覆盖全部。
+
 ```bash
-.conda\python.exe -m pytest tests\tools\ -q
+.conda\python.exe -m pytest tests\ -q
 ```
 
 ---
 
 ## 6. 已知约束 / 坑
 
-- **`supervision.dataset.formats.labelme` 缺失**：`tests/tools/` 里有 3 个
-  LabelMe 导出相关的测试会因为当前环境装的 `supervision` 版本缺少这个模块
-  而失败。这与本次项目重构无关，是 baseline 问题。
+- **`supervision.dataset.formats.labelme` 缺失**：`tests/` 下与 LabelMe 导出
+  相关的测试会因为当前环境装的 `supervision` 版本缺少这个模块而失败。这与本次
+  项目重构无关，是 baseline 问题。
+
+- **torch / CUDA 测试**：`tests/test_torch_cuda.py` 校验 torch 可导入与 CUDA
+  可用性；无 GPU 环境用 `pytest.skip` 跳过 GPU 相关断言，不报错。
+
+- **ONNX CPU/GPU 测试**：`tests/test_reannotate_face_hand_onnx.py` 用真实
+  `onnxruntime` 验证模型可在 `CPUExecutionProvider` 上推理，存在
+  `CUDAExecutionProvider` 时再验证 GPU 推理；缺 `onnxruntime` 时整体
+  `pytest.importorskip` 跳过，无 CUDA 时 GPU 用例 `pytest.skip` 跳过。
 
 - **目录名带下划线**：`datasets/01_annotated` 这种带数字前缀的目录是为了让
   `ls` 时能按阶段顺序排列，不要随意改。
@@ -420,7 +448,7 @@ python -m tools.workflow --config src\recover_yolo0708.yaml --from-stage inherit
 5. **验证**：
    - `.conda\python.exe -m py_compile <file>`；
    - `.conda\python.exe <file> --help`；
-   - `.conda\python.exe -m pytest tests\tools\ -q`；
+   - `.conda\python.exe -m pytest tests\ -q`；
    - 工作流改动用 `--dry-run` 验证。
 6. **同步文档**：改了工作流 / 加了新阶段，更新 [workflow.md](workflow.md) 和
    [workflow_config.yaml.example](workflow_config.yaml.example)。
