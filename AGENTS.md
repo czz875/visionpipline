@@ -63,7 +63,7 @@ cjet-vision-pipeline/
 │   │   │   ├── yolo.py            #     ultralytics YOLO（YOLOLabeler）
 │   │   │   └── detr.py            #     ultralytics DETR（DETRLabeler，预留）
 │   │   ├── ops.py                 #   打标/覆盖共用底层：框几何 + 打码 + LabelMe IO
-│   │   ├── auto.py                #   统一标注入口：supervision 后端（YOLO/SAM3/DETR）+ ONNX 后端（两路打标 / 覆盖，打码抽到 ops.apply_blackout）
+│   │   ├── auto.py                #   统一标注入口：supervision 后端（YOLO/SAM3/DETR）+ ONNX 后端（两路打标 / 覆盖）+ 多检测器组合（--detectors-config 任意 N 路混搭，打码抽到 ops.apply_blackout）
 │   │   └── merge.py               #   框合并
 │   ├── clean/                     # 清洗阶段
 │   │   ├── blurry.py              #   CleanVision 模糊检测
@@ -238,13 +238,22 @@ if __name__ == "__main__" and __package__ in (None, ""):
    - 两类编排都从这里 import，不要在编排层重复实现。
 
 3. **编排层（顶层）**
-   - `auto.py`：统一标注入口。`--model-type yolo|sam3|detr` 走 supervision 数据集式；
-     `--model-type onnx` 走 ONNX 后端——ONNX 一路（可选 SAM 第二路）两路打标，或加
-     `--reannotate` 覆盖指定类别并保留其它类别；打码统一由 `ops.apply_blackout` 完成。
+   - `auto.py`：统一标注入口，三条并存的路：
+     1. `--model-type yolo|sam3|detr`：走 supervision 数据集式导出（YOLO/LabelMe/COCO）；
+     2. `--model-type onnx`：走 ONNX 后端——ONNX 一路（可选 SAM 第二路）两路打标，或加
+        `--reannotate` 覆盖指定类别并保留其它类别；
+     3. `--detectors-config <yaml>`：**多检测器组合**（任意 N 路混搭、同类型可多路，
+        如两个 YOLO / 两个 ONNX / onnx+sam+yolo / detr+onnx+sam+yolo）。每路各自
+        推理出「框 + 逐框标签」，统一走「合并保留大框 -> 逐路小框打码（重叠保护）->
+        输出 LabelMe」链路。检测器与全局项由 YAML 描述（cfg 放 `src/`，不入 git；
+        模板见 `tools/cfg/detectors.yaml.example`）。
+     打码统一由 `ops.apply_blackout` 完成；多路合并链路是 `_run_multi_source_annotation`。
    - `merge.py`：框合并。
 
 新增检测器后端时，**只在 `backends/` 加一个文件并实现 `AutoLabeler` 接口**，再在编排层按需调用；
-不要把新后端的推理逻辑塞进 `ops.py` 或某个编排脚本里。
+若要接入多检测器组合，只需在 `auto._build_detectors` 里加一个 `type` 分支，把后端包成
+`detect(image, image_path) -> (框, 逐框标签)`，**不要**把新后端的推理逻辑塞进 `ops.py`
+或某个编排脚本里。
 
 ---
 
@@ -300,6 +309,12 @@ if __name__ == "__main__" and __package__ in (None, ""):
 # 该工作流也支持用 tools/workflow.py 跑（临时 cfg 在 src/，不入 git）：
 #   python -m tools.workflow --config src\onnx_sam_mosaic.yaml --dry-run
 #   python -m tools.workflow --config src\onnx_sam_mosaic.yaml
+
+# 多检测器组合标注：任意 N 路混搭（onnx/sam/yolo，可混搭、同类型可多路），
+# 全部检测器与全局项由 YAML 描述（cfg 放 src/，不入 git；模板见
+# tools/cfg/detectors.yaml.example）。默认预览，加 --apply 才写盘。
+.conda\python.exe tools\annotate\auto.py --detectors-config src\detectors.yaml
+.conda\python.exe tools\annotate\auto.py --detectors-config src\detectors.yaml --apply
 
 # 框合并
 .conda\python.exe tools\annotate\merge.py ^
