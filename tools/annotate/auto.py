@@ -12,11 +12,9 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
-from abc import ABC, abstractmethod
 from pathlib import Path
 
 import numpy as np
-import numpy.typing as npt
 from tqdm import tqdm
 
 # 允许以 `python tools/annotate/auto.py` 直接运行；本脚本在写入
@@ -47,7 +45,7 @@ DEFAULT_COPY_IMAGES = False
 
 
 # =============================================================================
-# 2. 常量与类型别名
+# 2. 常量与后端导入
 # =============================================================================
 
 from tools.core import (  # noqa: E402
@@ -57,17 +55,14 @@ from tools.core import (  # noqa: E402
     save_labelme,
 )
 
-# 脚本属于工具层，类型仅用于内部提示，不参与运行时检查。
-from typing import TYPE_CHECKING  # noqa: E402
-
-if TYPE_CHECKING:
-    import supervision as sv
-
-    DetectionsLike = sv.Detections
-    DatasetLike = sv.DetectionDataset
-else:
-    DetectionsLike = object
-    DatasetLike = object
+# 检测器后端按模型类型分离，统一从 tools.annotate.backends 引入。
+from tools.annotate.backends import (  # noqa: E402
+    AutoLabeler,
+    DatasetLike,
+    DetectionsLike,
+    SAM3Labeler,
+    YOLOLabeler,
+)
 
 
 # =============================================================================
@@ -88,125 +83,11 @@ def ensure_local_supervision_import() -> None:
 
 
 # =============================================================================
-# 4. 标注器抽象与实现
+# 4. 标注器后端
 # =============================================================================
 
-
-class AutoLabeler(ABC):
-    """自动标注器的统一接口。
-
-    所有模型后端的标注器（YOLO、SAM3、后续 DETR 等）都只需实现
-    `predict(image_path) -> sv.Detections`，并暴露 `classes` 属性供数据集
-    构建时使用。
-    """
-
-    classes: list[str]
-
-    @abstractmethod
-    def predict(self, image_path: Path) -> DetectionsLike:
-        """对单张图片进行推理并返回 `sv.Detections`。"""
-        ...
-
-
-class YOLOLabeler(AutoLabeler):
-    """基于 Ultralytics YOLO 的自动标注器。"""
-
-    def __init__(self, model_path: str, predict_kwargs: dict) -> None:
-        """加载 YOLO 模型并保存推理参数。
-
-        Args:
-            model_path: YOLO 权重路径或模型名称。
-            predict_kwargs: 传递给 `model.predict()` 的关键字参数。
-        """
-        from ultralytics import YOLO  # noqa: WPS433 — 延迟导入重型依赖
-
-        self.model = YOLO(model_path)
-        self.predict_kwargs = predict_kwargs
-        self.classes = [
-            self.model.names[i] for i in sorted(self.model.names.keys())
-        ]
-
-    def predict(self, image_path: Path) -> DetectionsLike:
-        """对单张图片执行 YOLO 推理并转换为 `sv.Detections`。"""
-        import supervision as sv
-
-        result = self.model.predict(source=str(image_path), **self.predict_kwargs)[0]
-        return sv.Detections.from_ultralytics(result)
-
-
-class SAM3Labeler(AutoLabeler):
-    """基于本地 ultralytics SAM3 权重的开放词汇分割标注器。
-
-    使用 ``weight/sam3.1_multiplex.pt``（ultralytics 格式）作为默认后端，
-    通过文本提示（prompt）对图中所有匹配实例做实例分割。一次多提示调用即可
-    拿到带 ``class_id``（= 提示索引）的 ``sv.Detections``。
-    """
-
-    def __init__(
-        self,
-        model_path: str,
-        classes: list[str],
-        device: str | None,
-        conf_threshold: float = 0.25,
-    ) -> None:
-        """加载 SAM3 预测器。
-
-        Args:
-            model_path: 本地 SAM3 权重路径（ultralytics 格式，如 .pt）。
-            classes: 文本提示列表，每个提示对应一个类别。
-            device: 推理设备，如 ``cpu`` / ``0`` / ``cuda``；留空则自动选择。
-            conf_threshold: 掩膜/框置信度阈值。
-        """
-        from ultralytics.models.sam import SAM3SemanticPredictor
-
-        overrides = {
-            "conf": conf_threshold,
-            "task": "segment",
-            "mode": "predict",
-            "model": str(model_path),
-            "save": False,
-            "verbose": False,
-        }
-        if device:
-            overrides["device"] = device
-        self.predictor = SAM3SemanticPredictor(overrides=overrides)
-        self.classes = classes
-        self.conf_threshold = conf_threshold
-
-    def predict(self, image_path: Path) -> DetectionsLike:
-        """对单张图片执行 SAM3 文本提示分割并转换为 ``sv.Detections``。
-
-        一次传入全部提示，结果的 ``boxes.cls`` 即为提示索引，据此写入
-        ``class_id``，无需对每个提示单独推理。
-        """
-        import supervision as sv
-
-        self.predictor.set_image(str(image_path))
-        results = self.predictor(text=self.classes)
-        if not results:
-            return sv.Detections.empty()
-        result = results[0]
-        boxes = getattr(result, "boxes", None)
-        if boxes is None or len(boxes) == 0:
-            return sv.Detections.empty()
-
-        xyxy = boxes.xyxy.cpu().numpy().astype(np.float32)
-        cls = boxes.cls.cpu().numpy().astype(int)
-        conf = (
-            boxes.conf.cpu().numpy().astype(np.float32)
-            if boxes.conf is not None
-            else np.ones(len(xyxy), dtype=np.float32)
-        )
-        # 只保留落在提示类别范围内的结果（过滤异常 cls）。
-        keep = (cls >= 0) & (cls < len(self.classes))
-        xyxy, cls, conf = xyxy[keep], cls[keep], conf[keep]
-        if len(xyxy) == 0:
-            return sv.Detections.empty()
-        return sv.Detections(
-            xyxy=xyxy,
-            class_id=cls,
-            confidence=conf,
-        )
+# 各模型后端（YOLO / SAM3 / DETR）已拆分到 tools.annotate.backends，按模型类型
+# 分文件维护；本脚本只做「打标编排」：类别/置信度过滤、累积数据集、导出。
 
 
 # =============================================================================

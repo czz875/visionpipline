@@ -89,7 +89,7 @@ CATEGORY_DIRS: tuple[str, ...] = (
     "multi_hand",
     "multi_label",
     "only_hand",
-    "only_head",
+    "only_face",
     "other",
 )
 

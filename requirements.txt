@@ -38,7 +38,7 @@ torchvision==0.26.0
 #   .conda\python.exe -m pip install torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cu130
 
 # ---------- ONNX 推理 ----------
-# 手部 / 人脸 ONNX 检测器（tools/annotate/reannotate_face_hand_onnx.py）使用；
+# ONNX 检测器（tools/annotate/backends/onnx.py 通用封装）使用；
 # GPU 版优先，无 CUDA 环境时改为 onnxruntime。
 onnxruntime-gpu==1.27.0
 
