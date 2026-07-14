@@ -1,0 +1,327 @@
+# tools/cfg/all_modules.yaml.example
+# 全部模块的「用法示例」：把每个 tools/ 下的脚本都列成一个 stage，方便复制调用。
+#
+# ───────────────────────────────────────────────────────────────────────────
+# 怎么用
+#   1) 复制成本地可改的配置（二选一）：
+#        copy tools\cfg\all_modules.yaml.example tools\cfg\workflow_config.yaml
+#        # 或者放到临时工作流目录（推荐，不被 git 跟踪）：
+#        copy tools\cfg\all_modules.yaml.example src\all_modules.yaml
+#   2) 预览（不真正执行，会打印每个阶段将要跑的命令与并行分组）：
+#        .conda\python.exe tools\workflow.py --config tools\cfg\all_modules.yaml.example --dry-run
+#        # 或复制成 src\all_modules.yaml 后：
+#        .conda\python.exe tools\workflow.py --config src\all_modules.yaml --dry-run
+#   3) 真跑：把上面命令的 --dry-run 去掉。
+#
+# ───────────────────────────────────────────────────────────────────────────
+# 两个开关
+#   ① enabled: true / false   —— 是否启用该模块（不想跑的设 false 即可）。
+#   ② order: <整数>           —— 运行顺序。相同 order 的 stage 会「并行」同时启动；
+#                                不同 order 按整数从小到大「顺序」执行。
+#                                不写 order 的 stage 退化为各自独立顺序执行。
+#
+#   例（你给的写法）：让 jpg_to_png 和 train_yolo 同时在第 1 批跑，fix_labelme 在第 2 批跑：
+#     order: 1   jpg_to_png
+#     order: 1   train_yolo
+#     order: 2   fix_labelme
+#   在下面只需给这两个 stage 标上相同 order 即可（见 auto_onnx / auto_detr 等同序备选）。
+#
+# 说明：本文件通过 resolve_config() 会自动叠加 tools/cfg/default.yaml +
+# tools/cfg/workflow.yaml；同名 stage 以本文件的命令/order/enabled 为准（字段级覆盖）。
+# paths / parameters 如不写则走 default.yaml 的默认值，这里给出完整副本方便你改。
+# ───────────────────────────────────────────────────────────────────────────
+
+project:
+  name: cjet_dataset
+
+paths:
+  raw_jpg: datasets/raw_jpg
+  raw_data: datasets/raw
+  ir_aug: datasets/raw_ir_aug
+  autolabel: datasets/autolabel
+  backup_dir: C:/Users/EDY/Pictures
+  behavior: datasets/behavior
+  annotated: datasets/01_annotated
+  cleaned: datasets/01_annotated
+  blurry_output: datasets/_blurry
+  high_quality: datasets/02_high_quality_30
+  remaining: datasets/02_remaining_70
+  yolo: datasets/yolo
+  model_dir: runs/train
+  self_annotated_labels: datasets/04_self_annotated_labels
+  labelme_final: datasets/05_labelme_final
+  archive: archive
+
+parameters:
+  merge_distance_x: 100
+  merge_distance_y: 200
+  max_merge_width: 600
+  max_merge_height: 600
+  blurry_threshold: 0.185
+  high_quality_ratio: 0.3
+  split_seed: 42
+  yolo_weights: yolov8n.pt
+  yolo_epochs: 100
+  jpg_to_png_threads: 16
+  jpg_to_png_compression: 9
+  tar_gz_level: 6
+  ir_aug_repeat: 3
+  ir_aug_workers: 8
+  ir_aug_local_classes: "all"
+  inherit_batch_size: 1000
+  snapshot_level: 6
+  yolo_classes: "phone,cigarette,face,hand"
+
+stages:
+  # ---------- 第 1 批：数据接续（备份 + autolabel 接续 + JSON 修复 + 重命名） ----------
+  - name: backup_snapshot
+    order: 1
+    enabled: true
+    command: >
+      python tools/backup/snapshot.py
+      --sources ${paths.autolabel},${paths.behavior}
+      --output-dir ${paths.backup_dir}
+      --level ${parameters.snapshot_level}
+      --apply
+
+  - name: inherit_dataset
+    order: 2
+    enabled: true
+    command: >
+      python tools/merge/inherit_dataset.py
+      --source ${paths.autolabel}
+      --target ${paths.behavior}
+      --batch-size ${parameters.inherit_batch_size}
+      --apply
+
+  # order 3 的 3 个 stage 都是「修 JSON / 改标签」类，彼此独立，可并行同时跑：
+  # fix_labelme 默认开；align_labelme / replace 默认关，需要时把 enabled 改成 true。
+  - name: fix_labelme
+    order: 3
+    enabled: true
+    command: >
+      python tools/label/fix_labelme.py
+      --root ${paths.behavior}
+      --recursive
+      --apply
+
+  - name: align_labelme
+    order: 3
+    enabled: false
+    command: >
+      python tools/label/align_labelme.py
+      --root ${paths.behavior}
+      --recursive
+      --apply
+
+  - name: replace_label
+    order: 3
+    enabled: false
+    command: >
+      python tools/label/replace.py
+      --input ${paths.behavior}
+      --output ${paths.behavior}_replaced
+      --replace face=person
+
+  - name: rename_with_labelme_sync
+    order: 4
+    enabled: true
+    command: >
+      python tools/rename/timestamp_rename.py
+      --source-dir ${paths.behavior}
+      --labelme-sync
+      --apply
+
+  # ---------- 第 5/6 批：数据进入（JPG→PNG / IR 增强，可选） ----------
+  - name: jpg_to_png
+    order: 5
+    enabled: false
+    command: >
+      python tools/convert/jpg_to_png.py
+      --input ${paths.raw_jpg}
+      --output ${paths.raw_data}
+      --num-threads ${parameters.jpg_to_png_threads}
+      --png-compression ${parameters.jpg_to_png_compression}
+      --recursive
+
+  - name: ir_enhance
+    order: 6
+    enabled: false
+    command: >
+      python tools/augment/ir_enhance.py
+      --input-dir ${paths.raw_data}
+      --output-dir ${paths.ir_aug}
+      --repeat ${parameters.ir_aug_repeat}
+      --workers ${parameters.ir_aug_workers}
+      --local-light-classes ${parameters.ir_aug_local_classes}
+
+  # ---------- 第 7 批：自动标注（主用 yolo；其余为备选，同 order 可并行可单选） ----------
+  - name: auto_annotate
+    order: 7
+    enabled: true
+    command: >
+      python tools/annotate/auto.py
+      --model-type yolo
+      --source ${paths.raw_data}
+      --output ${paths.annotated}
+      --format labelme
+
+  - name: auto_onnx
+    order: 7
+    enabled: false
+    command: >
+      python tools/annotate/auto.py --model-type onnx
+      --source ${paths.raw_data}
+      --output ${paths.annotated}_onnx
+      --onnx-model weight\yolov5s-lmk.onnx
+      --onnx-label face
+      --onnx-min-ratio 0.01 --apply
+
+  - name: auto_onnx_sam
+    order: 7
+    enabled: false
+    command: >
+      python tools/annotate/auto.py --model-type onnx
+      --source ${paths.raw_data}
+      --output ${paths.annotated}_onnx_sam
+      --onnx-model weight\yolov5s-lmk.onnx --onnx-label face
+      --sam-model weight\sam3.1_multiplex.pt --sam-prompt hand --sam-label hand
+      --onnx-min-ratio 0.01 --sam-min-ratio 0.01 --mosaic-block 16 --apply
+
+  - name: auto_detr
+    order: 7
+    enabled: false
+    command: >
+      python tools/annotate/auto.py
+      --model-type detr
+      --source ${paths.raw_data}
+      --output ${paths.annotated}_detr
+      --format labelme
+
+  - name: auto_detectors
+    order: 7
+    enabled: false
+    command: >
+      python tools/annotate/auto.py
+      --detectors-config src/detectors.yaml
+      --source ${paths.raw_data}
+      --output ${paths.annotated}_multi
+
+  # ---------- 第 8/9 批：框合并 + 清洗（模糊检测） ----------
+  - name: merge_boxes
+    order: 8
+    enabled: true
+    command: >
+      python tools/annotate/merge.py
+      --json-dir ${paths.annotated}
+      --merge-distance-x ${parameters.merge_distance_x}
+      --merge-distance-y ${parameters.merge_distance_y}
+      --max-merge-width ${parameters.max_merge_width}
+      --max-merge-height ${parameters.max_merge_height}
+
+  - name: cleanvisionblurry
+    order: 9
+    enabled: true
+    command: >
+      python tools/clean/blurry.py
+      --dataset-path ${paths.annotated}
+      --output-path ${paths.blurry_output}
+      --blurry-threshold ${parameters.blurry_threshold}
+      --recursive
+      --cleanup-crop
+
+  # ---------- 第 10 批：两个清理步骤独立，并行同时跑 ----------
+  - name: clean_orphan
+    order: 10
+    enabled: true
+    command: python tools/clean/orphan_json.py --dataset-path ${paths.annotated} --recursive
+
+  - name: remove_missing
+    order: 10
+    enabled: true
+    command: python tools/clean/orphan_images.py --dataset-path ${paths.annotated} --recursive
+
+  # ---------- 第 11 批：人工清洗检查点（打印提示后继续） ----------
+  - name: manual_review
+    order: 11
+    enabled: true
+    command: >
+      echo "请人工检查并修正 ${paths.annotated}，完成后运行："
+      echo "  python tools/workflow.py --config tools/cfg/all_modules.yaml.example --from-stage select_subset"
+
+  # ---------- 第 12~19 批：拆分 → 转 YOLO → 训练 → 自标注 → 回 LabelMe → 终洗 → 归档 ----------
+  - name: select_subset
+    order: 12
+    enabled: true
+    command: >
+      python tools/split/dataset.py
+      --input ${paths.annotated}
+      --output-a ${paths.high_quality}
+      --output-b ${paths.remaining}
+      --ratio ${parameters.high_quality_ratio}
+      --seed ${parameters.split_seed}
+
+  - name: convert_to_yolo
+    order: 13
+    enabled: true
+    command: >
+      python tools/convert/labelme_to_yolo.py
+      --src ${paths.behavior}
+      --out ${paths.yolo}
+      --classes ${parameters.yolo_classes}
+
+  - name: train_yolo
+    order: 14
+    enabled: true
+    command: >
+      yolo detect train
+      data=${paths.yolo}/all/data.yaml
+      model=${parameters.yolo_weights}
+      epochs=${parameters.yolo_epochs}
+      project=${paths.model_dir}
+      name=exp
+
+  - name: self_annotate
+    order: 15
+    enabled: true
+    command: >
+      python tools/annotate/auto.py
+      --model-type yolo
+      --model ${paths.model_dir}/exp/weights/best.pt
+      --source ${paths.remaining}
+      --output ${paths.self_annotated_labels}
+      --format yolo
+
+  - name: convert_back_labelme
+    order: 16
+    enabled: true
+    command: >
+      python tools/convert/yolo_to_labelme.py
+      --images ${paths.remaining}
+      --labels ${paths.self_annotated_labels}
+      --classes ${paths.yolo}/all/data.yaml
+      --output ${paths.labelme_final}
+
+  - name: final_clean
+    order: 17
+    enabled: true
+    command: python tools/clean/orphan_json.py --dataset-path ${paths.labelme_final} --recursive
+
+  - name: archive
+    order: 18
+    enabled: true
+    command: >
+      python tools/train/archive.py
+      --sources ${paths.high_quality},${paths.yolo},${paths.model_dir},${paths.labelme_final}
+      --output ${paths.archive}
+      --tag ${project.name}
+      --note "每日训练归档"
+
+  - name: create_tar_gz
+    order: 19
+    enabled: false
+    command: >
+      python tools/train/create_tar_gz.py
+      --input ${paths.archive}/latest
+      --output ${paths.archive}/latest.tar.gz
+      --level ${parameters.tar_gz_level}

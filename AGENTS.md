@@ -53,6 +53,7 @@ cjet-vision-pipeline/
 │   │   ├── default.yaml           #   系统默认（paths / parameters / log_file）
 │   │   ├── workflow.yaml          #   系统主工作流 stage 定义
 │   │   ├── inherit_yolo.yaml      #   任务专项：接续 + 重命名 + 转 YOLO（走 stages_only）
+│   │   ├── all_modules.yaml.example # 全部模块「用法总表」：每个 tools 脚本一个 stage，带 enabled/order
 │   │   ├── detectors.yaml.example #   多检测器组合标注模板（--detectors-config 引用，见 §4.10）
 │   │   └── workflow_config.yaml.example   #   项目级覆盖示例（复制为 src/workflow_config.yaml）
 │   ├── engine/                    # 各 stage 聚合入口（仿 ultralytics/engine）
@@ -411,6 +412,18 @@ if __name__ == "__main__" and __package__ in (None, ""):
 如果只想跑主工作流中的某几个 stage，在 project 顶层加 `stages_only: [name1, name2, ...]`
 字段即可——列出的 stage 按顺序从 `workflow.yaml` 拿完整定义，其它 stage 全部跳过。
 详见 `tools/cfg/inherit_yolo.yaml`。
+
+**每个 stage 的两个开关：**
+- `enabled: true/false` —— 是否启用该 stage（`false` 跳过，默认 `true`）。
+- `order: <整数>` —— 运行顺序。`order` 相同的 stage 会**并行**同时启动（组内彼此独立）；
+  不同 `order` 按整数从小到大**顺序**执行。不写 `order` 的 stage 退化为各自独立成组、保序执行。
+  适合「两个互不依赖的模块一起跑」的场景，例如让 `jpg_to_png` 与 `train_yolo` 都标 `order: 1`、
+  把 `fix_labelme` 标 `order: 2`，即你给的写法 `1、jpg_to_png 1、train_yolo  2、fix_labelme`。
+
+**配置合并规则**：`resolve_config()` 把 `default.yaml` + `workflow.yaml` + 项目层按 name 做
+字段级合并——项目层后加载，可给同名 stage 追加/覆盖 `order` / `enabled` / `command`，
+其余键（如 `workflow.yaml` 提供的 `command`）保留。示例见 `tools/cfg/all_modules.yaml.example`
+（覆盖全部模块、可直接 `--config` 预览的「用法总表」）。
 
 ```bash
 # 预览整条链路（不真跑）

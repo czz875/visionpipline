@@ -15,6 +15,10 @@
 
     # 也可显式指定其它入口（如直接用系统主工作流）
     python tools/workflow.py --config tools/cfg/workflow.yaml
+
+每个 stage 支持两个开关：`enabled: true/false` 控制是否启用；`order: <整数>`
+控制运行顺序——相同 order 的 stage 并行同时启动，不同 order 按整数升序顺序执行
+（不写 order 则退化为各自独立顺序执行）。详见 tools/cfg/all_modules.yaml.example。
 """
 
 from __future__ import annotations
@@ -108,6 +112,69 @@ def run_stage(
 
 
 # =============================================================================
+# 2b. 排序与并行分组
+# =============================================================================
+
+
+def _order_value(stage: dict, index: int) -> int:
+    """取 stage 的 order 字段用于排序；缺失或非整数时退化为列表位置，保序执行。"""
+    order = stage.get("order")
+    if order is None:
+        return index
+    try:
+        return int(order)
+    except (TypeError, ValueError):
+        return index
+
+
+def run_group(
+    group: list[dict],
+    mapping: dict[str, str],
+    dry_run: bool,
+    log_path: Path,
+) -> bool:
+    """执行同一 order 值的阶段组。
+
+    组内启用的阶段 >1 个时并行（``subprocess.Popen`` 同时启动），否则退化为单阶段
+    顺序执行。全部成功返回 ``True``。``enabled: false`` 的 stage 会跳过。
+    """
+    active = [s for s in group if s.get("enabled", True)]
+    if not active:
+        return True
+    if len(active) == 1:
+        return run_stage(active[0], mapping, dry_run, log_path)
+
+    names = [s.get("name", "unnamed") for s in active]
+    print(f"\n[并行] 同序组同时启动 {len(active)} 个阶段：{', '.join(names)}")
+    if dry_run:
+        for s in active:
+            run_stage(s, mapping, True, log_path)
+        return True
+
+    procs: list[tuple[dict, subprocess.Popen]] = []
+    for s in active:
+        command = substitute_variables(s.get("command", ""), mapping)
+        now = datetime.now().isoformat(timespec="seconds")
+        print(f"\n[{now}] >>> [并行] 阶段：{s.get('name', 'unnamed')}\n    {command}")
+        with log_path.open("a", encoding="utf-8") as log:
+            log.write(f"[{now}] [{s.get('name', 'unnamed')}] {command}\n")
+        procs.append((s, subprocess.Popen(command, shell=True, cwd=PROJECT_ROOT)))
+
+    ok = True
+    for s, proc in procs:
+        proc.wait()
+        if proc.returncode != 0:
+            print(f"    [失败] 阶段 {s.get('name', 'unnamed')} 返回码 {proc.returncode}")
+            with log_path.open("a", encoding="utf-8") as log:
+                log.write(
+                    f"[{datetime.now().isoformat(timespec='seconds')}] "
+                    f"[{s.get('name', 'unnamed')}] FAILED rc={proc.returncode}\n"
+                )
+            ok = False
+    return ok
+
+
+# =============================================================================
 # 3. CLI
 # =============================================================================
 
@@ -180,26 +247,39 @@ def run(
         print("[警告] 配置文件中没有定义 stages。")
         return 0
 
-    started = not from_stage
-    for stage in stages:
-        name = stage.get("name", "unnamed")
+    # 按 order 分组：order 相同 → 同一组，组内并行；组间按 order 升序顺序执行。
+    # 未写 order 的 stage 退化成「列表位置」，即各自独立成组、保序顺序执行。
+    ordered = sorted(
+        enumerate(stages),
+        key=lambda kv: (_order_value(kv[1], kv[0]), kv[0]),
+    )
+    groups: list[list[dict]] = []
+    for _idx, stage in ordered:
+        if groups and _order_value(groups[-1][-1], 0) == _order_value(stage, 0):
+            groups[-1].append(stage)
+        else:
+            groups.append([stage])
 
-        if to_stage and name == to_stage:
-            print(f"\n[暂停] 已到达阶段 '{name}' 前，等待人工处理。")
+    started = not from_stage
+    for group in groups:
+        names = [s.get("name", "") for s in group]
+
+        if to_stage and to_stage in names:
+            print(f"\n[暂停] 已到达阶段 '{to_stage}' 前，等待人工处理。")
             return 0
 
-        if not stage.get("enabled", True):
-            continue
-
-        if not started and from_stage:
-            if name == from_stage:
+        if from_stage and not started:
+            if from_stage in names:
                 started = True
             else:
-                print(f"[跳过] {name}")
+                print(f"[跳过] 同序组：{', '.join(names)}")
                 continue
 
-        if not run_stage(stage, mapping, dry_run, log_path):
-            print(f"\n[终止] 阶段 {name} 失败，工作流中断。")
+        if not started:
+            continue
+
+        if not run_group(group, mapping, dry_run, log_path):
+            print(f"\n[终止] 同序组内某阶段失败，工作流中断。")
             return 1
 
     print("\n[完成] 工作流全部阶段执行完毕。")
