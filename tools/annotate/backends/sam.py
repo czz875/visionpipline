@@ -4,7 +4,7 @@ tools/annotate/backends/sam.py
 ultralytics SAM 文本 prompt 后端，提供两种粒度：
 
 - ``SAMTextDetector``：返回原图像素坐标系下的 ``xyxy`` numpy 框，供
-  ``auto_onnx_sam.py`` / ``reannotate_onnx.py`` 等直接编排；
+  ``auto.py``（ONNX 模式）直接编排；
 - ``SAM3Labeler``：实现 ``AutoLabeler`` 接口，返回 supervision ``sv.Detections``，
   供 ``auto.py`` 以统一数据集方式导出。
 

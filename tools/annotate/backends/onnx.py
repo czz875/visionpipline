@@ -6,7 +6,7 @@ ONNX 检测后端：通用 ONNX 推理封装 ``OnnxDetector``，以及 YOLO 风�
 
 不绑定任何具体类别（face / hand 等），通过 ``transpose`` / ``score_indices`` /
 ``decoder`` 适配不同 YOLO 风格输出；返回的是原图像素坐标系下的 ``xyxy`` numpy
-框，供 ``auto_onnx_sam.py`` / ``reannotate_onnx.py`` 等编排脚本复用。
+框，供 ``auto.py``（ONNX 模式）等编排脚本复用。
 """
 
 from __future__ import annotations
