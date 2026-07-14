@@ -1,0 +1,60 @@
+# =============================================================================
+# 多检测器组合标注配置示例（tools/annotate/auto.py --detectors-config）
+#
+# 用法（复制到 src/ 后按需改名，src/ 不入 git；默认预览，加 --apply 才写盘）：
+#   .conda\python.exe tools\annotate\auto.py --detectors-config src\detectors.yaml
+#   .conda\python.exe tools\annotate\auto.py --detectors-config src\detectors.yaml --apply
+#
+# 机制：detectors 列表里每一路各自推理出「框 + 逐框标签」，统一走「合并保留
+# 大框 -> 逐路小框打码（重叠保护）-> 输出 LabelMe」链路。可任意混搭、同类型
+# 可多路（如两个 YOLO / 两个 ONNX / onnx+sam+yolo / detr+onnx+sam+yolo）。
+# =============================================================================
+
+# ---- 全局项（可省略，省略则回退到 CLI 默认）----
+source: datasets/raw                 # 输入图片目录
+output: datasets/01_annotated_multi  # 输出目录（图片 + 同名 .json）
+recursive: true                      # 递归扫描子目录
+blackout: false                      # false=马赛克（默认），true=纯黑打码
+mosaic_block: 16                     # 马赛克块大小（像素），越大越糊
+min_ratio: 0.01                      # 全局默认最小面积占比；小于此值的框打码后删除
+device: ""                           # 推理设备：cpu / 0 / cuda，留空自动
+
+# ---- 检测器列表（任意 N 路，可混搭、同类型可多路）----
+detectors:
+  # 一路 ONNX（人脸）：obj 分 * 关键点置信度（score_indices 支持列表或 "4,15"）
+  - type: onnx
+    name: face_onnx                  # 可选，仅用于统计打印；省略则自动取 onnx#0
+    model: weight/yolov5s-lmk.onnx
+    label: face
+    conf: 0.25
+    min_ratio: 0.01                  # 可选，覆盖全局 min_ratio
+    score_indices: [4, 15]
+    transpose: false
+    normalize: true
+    iou: 0.45
+
+  # 一路 SAM 文本 prompt（手）
+  - type: sam
+    model: weight/sam3.1_multiplex.pt
+    prompt: hand
+    label: hand
+    conf: 0.25
+    min_ratio: 0.01
+
+  # 一路 ultralytics YOLO（单模型多类别）
+  - type: yolo
+    model: weight/best.pt
+    conf: 0.25
+    iou: 0.45
+    imgsz: 640
+    # classes 省略=保留模型全部类别；给列表则只保留其中的类别
+    classes: [phone, cigarette]
+    # label 省略=沿用 YOLO 原类别名逐框标注；给字符串则把保留的框统一改名
+    # label: object
+    min_ratio: 0.0
+
+  # 同类型可多路：再加一个不同权重的 YOLO
+  # - type: yolo
+  #   name: yolo_extra
+  #   model: weight/another.pt
+  #   classes: [person]

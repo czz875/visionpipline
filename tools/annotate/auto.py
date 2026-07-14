@@ -9,6 +9,9 @@ tools/annotate/auto.py
   用 ONNX 检测器标一路（可选 SAM 文本 prompt 标第二路），按面积占比切分保留/
   删除框，小框打码（默认马赛克，重叠保护）后从标注中删除，输出 LabelMe；
   加 ``--reannotate`` 则改为覆盖指定类别并保留其它现有类别（原地覆盖）。
+- 多检测器组合式：``--detectors-config <yaml>``，用 YAML 描述任意 N 路检测器
+  （onnx / sam / yolo / detr，可混搭、同类型可多路，如两个 YOLO / 两个 ONNX），
+  逐路归一成「框 + 逐框标签」后复用上面的打码合并链路，输出 LabelMe。
 
 打码（马赛克/纯黑）统一抽到 ``tools/annotate/ops.apply_blackout``，本脚本只编排。
 """
@@ -20,6 +23,7 @@ import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import cv2
 import numpy as np
@@ -98,11 +102,11 @@ from tools.annotate.backends.sam import SAMTextDetector
 from tools.annotate.ops import (  # noqa: E402
     DEFAULT_MOSAIC_BLOCK,
     apply_blackout,
+    classify_box_by_ratio,
+    clip_box,
     concat_boxes,
     extract_existing_label_boxes,
     rewrite_labelme_dict,
-    sanitize_boxes,
-    split_boxes_by_ratio,
 )
 
 
@@ -350,22 +354,45 @@ def _parse_score_indices(text: str) -> tuple[int, ...]:
 
 @dataclass
 class _BoxSource:
-    """单路检测/保留来源的框与标签，已按面积占比切分为保留/删除两部分。"""
-    label: str
+    """单路检测/保留来源的框与标签，已按面积占比切分为保留/删除两部分。
+
+    ``kept_labels`` 与 ``kept`` 逐框对齐，支持同一路检测器输出多个类别
+    （如一个 YOLO 模型同时给出 face / phone / hand）。删除的小框最终会被
+    打码删掉，无需保留标签。
+    """
     kept: np.ndarray
     removed: np.ndarray
+    kept_labels: list[str]
 
 
 def _build_source(
     boxes: np.ndarray,
-    label: str,
+    label: str | list[str],
     min_ratio: float,
     image_shape: tuple[int, int, int],
 ) -> _BoxSource:
-    """把原始框清洗并按面积占比切成保留/删除两部分。"""
-    boxes = sanitize_boxes(boxes, image_shape)
-    kept, removed = split_boxes_by_ratio(boxes, image_shape, min_ratio)
-    return _BoxSource(label=label, kept=kept, removed=removed)
+    """把原始框清洗并按面积占比切成保留/删除两部分，保留框携带逐框标签。
+
+    ``label`` 传单个字符串时对所有框统一标注（ONNX / SAM 单类别路）；
+    传列表时与 ``boxes`` 逐框对齐（YOLO 多类别路）。清洗（裁剪 + 丢弃退化框）
+    与按面积占比切分在同一次遍历完成，确保保留框与标签始终对齐。
+    """
+    labels = [label] * len(boxes) if isinstance(label, str) else list(label)
+    kept_boxes: list[np.ndarray] = []
+    kept_labels: list[str] = []
+    removed_boxes: list[np.ndarray] = []
+    for box, lab in zip(boxes, labels):
+        clipped = clip_box(box, image_shape)
+        if clipped[2] <= clipped[0] or clipped[3] <= clipped[1]:
+            continue
+        if classify_box_by_ratio(clipped, image_shape, min_ratio):
+            kept_boxes.append(clipped)
+            kept_labels.append(lab)
+        else:
+            removed_boxes.append(clipped)
+    kept = np.array(kept_boxes, dtype=np.float32) if kept_boxes else np.empty((0, 4), dtype=np.float32)
+    removed = np.array(removed_boxes, dtype=np.float32) if removed_boxes else np.empty((0, 4), dtype=np.float32)
+    return _BoxSource(kept=kept, removed=removed, kept_labels=kept_labels)
 
 
 def _resolve_keep_labels(
@@ -406,7 +433,7 @@ def _iter_batch_image_files(root: Path, start_batch: int, end_batch: int) -> lis
     return image_paths
 
 
-def _run_onnx_annotation(
+def _run_multi_source_annotation(
     image: np.ndarray,
     sources: list[_BoxSource],
     *,
@@ -417,7 +444,8 @@ def _run_onnx_annotation(
     """对多路来源执行：合并保留大框 -> 对每路小框打码（重叠保护）-> 汇总框与标签。
 
     所有保留大框共同构成「重叠保护区」，任一来源的小框只要与任一保留大框重叠
-    都不打码。返回（可能打码后的图像, 最终框, 最终标签, 打码区域数）。
+    都不打码。适用于任意 N 路检测器组合。返回（可能打码后的图像, 最终框,
+    最终标签, 打码区域数）。
     """
     all_kept = concat_boxes([s.kept for s in sources])
     blackout_total = 0
@@ -432,7 +460,7 @@ def _run_onnx_annotation(
         )
         blackout_total += n
     final_boxes = concat_boxes([s.kept for s in sources])
-    final_labels = [label for s in sources for label in [s.label] * len(s.kept)]
+    final_labels = [label for s in sources for label in s.kept_labels]
     return image, final_boxes, final_labels, blackout_total
 
 
@@ -494,7 +522,7 @@ def run_onnx(args: argparse.Namespace) -> int:
             for label in _resolve_keep_labels(json_path, args.onnx_label, keep_labels):
                 keep_boxes = extract_existing_label_boxes(json_path, label)
                 sources.append(_build_source(keep_boxes, label, min_keep_ratio, image.shape))
-            image, boxes, labels, n = _run_onnx_annotation(
+            image, boxes, labels, n = _run_multi_source_annotation(
                 image,
                 sources,
                 use_mosaic=use_mosaic,
@@ -542,7 +570,7 @@ def run_onnx(args: argparse.Namespace) -> int:
         if sam_detector is not None:
             sam_boxes, _ = sam_detector.predict(image_path)
             sources.append(_build_source(sam_boxes, args.sam_label, args.sam_min_ratio, image.shape))
-        image, boxes, labels, n = _run_onnx_annotation(
+        image, boxes, labels, n = _run_multi_source_annotation(
             image,
             sources,
             use_mosaic=use_mosaic,
@@ -578,6 +606,217 @@ def run_onnx(args: argparse.Namespace) -> int:
 
 
 # =============================================================================
+# 10.5 多检测器组合（--detectors-config，任意 N 路混搭）
+# =============================================================================
+
+
+@dataclass
+class _Detector:
+    """一路检测器的运行期封装：名称 + 最小面积占比 + 归一化的检测函数。
+
+    ``detect(image, image_path) -> (xyxy 框, 逐框标签)`` 屏蔽各后端输入差异
+    （ONNX 吃 ndarray、SAM/YOLO 吃 path），供多检测器链路统一调用。
+    """
+    name: str
+    min_ratio: float
+    detect: Callable[[np.ndarray, Path], tuple[np.ndarray, list[str]]]
+
+
+def _coerce_score_indices(value) -> tuple[int, ...]:
+    """把 YAML 里的 ``score_indices``（列表或 "4,15" 字符串）统一成 int 元组。"""
+    if isinstance(value, str):
+        return _parse_score_indices(value)
+    return tuple(int(v) for v in value)
+
+
+def _yolo_detect(
+    labeler: "YOLOLabeler",
+    image_path: Path,
+    keep_names: set[str],
+    rename: str | None,
+) -> tuple[np.ndarray, list[str]]:
+    """跑一次 YOLO 推理，抽出 xyxy 与逐框类别名。
+
+    ``keep_names`` 非空时只保留其中的类别；``rename`` 非空时把保留下来的框
+    统一改名为该标签（便于把多类别归并成一个打码/保留类别）。
+    """
+    detections = labeler.predict(image_path)
+    if len(detections) == 0 or detections.class_id is None:
+        return np.empty((0, 4), dtype=np.float32), []
+    xyxy = detections.xyxy.astype(np.float32)
+    names = [labeler.classes[int(cid)] for cid in detections.class_id]
+    boxes_out: list[np.ndarray] = []
+    labels_out: list[str] = []
+    for box, name in zip(xyxy, names):
+        if keep_names and name not in keep_names:
+            continue
+        boxes_out.append(box)
+        labels_out.append(rename or name)
+    if not boxes_out:
+        return np.empty((0, 4), dtype=np.float32), []
+    return np.array(boxes_out, dtype=np.float32), labels_out
+
+
+def _build_detectors(
+    detector_cfgs: list[dict[str, object]],
+    *,
+    default_min_ratio: float,
+    default_device: str | None,
+) -> list[_Detector]:
+    """按 YAML 配置逐项构造检测器（模型只加载一次），返回统一封装列表。
+
+    支持 ``onnx`` / ``sam`` / ``yolo`` 混搭且同类型可多路；``detr`` 预留未实现。
+    每项通用键：``type`` / ``model`` / ``min_ratio`` / ``conf`` / ``name``。
+    """
+    detectors: list[_Detector] = []
+    for idx, cfg in enumerate(detector_cfgs):
+        dtype = str(cfg.get("type", "")).lower()
+        min_ratio = float(cfg.get("min_ratio", default_min_ratio))
+        name = str(cfg.get("name") or f"{dtype}#{idx}")
+        device = cfg.get("device") or default_device
+
+        if dtype == "onnx":
+            backend = OnnxDetector(
+                Path(cfg["model"]),
+                str(cfg.get("label", "object")),
+                float(cfg.get("conf", DEFAULT_ONNX_CONF)),
+                normalize=bool(cfg.get("normalize", DEFAULT_ONNX_NORMALIZE)),
+                transpose=bool(cfg.get("transpose", DEFAULT_ONNX_TRANSPOSE)),
+                score_indices=_coerce_score_indices(
+                    cfg.get("score_indices", DEFAULT_ONNX_SCORE_INDICES)
+                ),
+                iou_threshold=float(cfg.get("iou", DEFAULT_IOU)),
+            )
+
+            def detect(image, _path, backend=backend):
+                return backend.predict(image)
+
+        elif dtype == "sam":
+            backend = SAMTextDetector(
+                model_path=Path(cfg["model"]),
+                label=str(cfg.get("label", cfg.get("prompt", "object"))),
+                conf=float(cfg.get("conf", DEFAULT_SAM_CONF)),
+                prompt=str(cfg["prompt"]),
+                device=device or None,
+            )
+
+            def detect(_image, image_path, backend=backend):
+                return backend.predict(image_path)
+
+        elif dtype == "yolo":
+            predict_kwargs: dict[str, object] = {
+                "conf": float(cfg.get("conf", DEFAULT_CONF)),
+                "iou": float(cfg.get("iou", DEFAULT_IOU)),
+                "imgsz": int(cfg.get("imgsz", DEFAULT_IMGSZ)),
+                "verbose": DEFAULT_VERBOSE,
+            }
+            if device:
+                predict_kwargs["device"] = device
+            backend = YOLOLabeler(str(cfg["model"]), predict_kwargs)
+            keep_names = {str(c) for c in cfg.get("classes", [])}
+            rename = cfg.get("label")
+
+            def detect(_image, image_path, backend=backend, keep=keep_names, rename=rename):
+                return _yolo_detect(backend, image_path, keep, rename)
+
+        elif dtype == "detr":
+            raise NotImplementedError("DETR 检测器尚未实现（见 backends/detr.py 预留）")
+        else:
+            raise ValueError(f"未知检测器类型：{dtype}")
+
+        detectors.append(_Detector(name=name, min_ratio=min_ratio, detect=detect))
+    return detectors
+
+
+def run_detectors(args: argparse.Namespace) -> int:
+    """执行多检测器组合标注（``--detectors-config <yaml>``）。
+
+    从 YAML 读取任意 N 路检测器与全局项，逐路归一成「框 + 逐框标签」后复用
+    ``_run_multi_source_annotation`` 的打码合并链路，输出 LabelMe。全局项
+    （source/output/recursive/打码策略/最小面积占比等）可写在 YAML 里，
+    未写则回退到 CLI 默认。是否写盘沿用 ``--apply``（默认预览）。
+    """
+    import yaml
+
+    cfg_path = Path(args.detectors_config)
+    if not cfg_path.is_file():
+        print(f"[错误] 检测器配置不存在：{cfg_path}", file=sys.stderr)
+        return 1
+    cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    detector_cfgs = cfg.get("detectors") or []
+    if not detector_cfgs:
+        print("[错误] 配置里 detectors 为空。", file=sys.stderr)
+        return 1
+
+    # 全局项：优先取 YAML，其次回退到 CLI 默认。
+    source = Path(cfg.get("source", args.source))
+    output = Path(cfg.get("output", args.output))
+    recursive = bool(cfg.get("recursive", args.recursive))
+    use_mosaic = not bool(cfg.get("blackout", False))  # 默认马赛克，blackout: true 用纯黑
+    mosaic_block = int(cfg.get("mosaic_block", args.mosaic_block))
+    default_min_ratio = float(cfg.get("min_ratio", DEFAULT_ONNX_MIN_RATIO))
+    device = cfg.get("device", args.device) or None
+
+    if not source.is_dir():
+        print(f"[错误] 输入目录不存在：{source}", file=sys.stderr)
+        return 1
+    images = list_images(source, recursive=recursive)
+    if not images:
+        print(f"[错误] 文件夹内没有图片：{source}", file=sys.stderr)
+        return 1
+    print(f"[信息] 共发现 {len(images)} 张图片，检测器 {len(detector_cfgs)} 路")
+
+    detectors = _build_detectors(
+        detector_cfgs, default_min_ratio=default_min_ratio, default_device=device
+    )
+    if not args.dry_run:
+        output.mkdir(parents=True, exist_ok=True)
+
+    per_kept: dict[str, int] = {d.name: 0 for d in detectors}
+    total_removed = total_mosaic = 0
+    for image_path in tqdm(images, desc="标注中", unit="img"):
+        image = cv2.imread(str(image_path))
+        if image is None:
+            raise ValueError(f"无法读取图片：{image_path}")
+        sources: list[_BoxSource] = []
+        for detector in detectors:
+            boxes, labels = detector.detect(image, image_path)
+            source_boxes = _build_source(boxes, labels, detector.min_ratio, image.shape)
+            per_kept[detector.name] += len(source_boxes.kept)
+            sources.append(source_boxes)
+        image, boxes, labels, n = _run_multi_source_annotation(
+            image,
+            sources,
+            use_mosaic=use_mosaic,
+            mosaic_block=mosaic_block,
+            dry_run=args.dry_run,
+        )
+        total_removed += sum(len(s.removed) for s in sources)
+        total_mosaic += n
+        if not args.dry_run:
+            out_img = output / image_path.name
+            out_json = out_img.with_suffix(".json")
+            cv2.imwrite(str(out_img), image)
+            data = rewrite_labelme_dict(out_json, boxes, labels, image.shape, image_path.name)
+            save_labelme(data, out_json)
+
+    mode = "预览" if args.dry_run else "完成"
+    print(f"[{mode}] 图片数：{len(images)}")
+    for name, count in per_kept.items():
+        print(f"[{mode}] 保留 {name}：{count}")
+    print(f"[{mode}] 小框(已删)：{total_removed}")
+    print(
+        f"[{mode}] 实际打码区域：{total_mosaic}"
+        f"（重叠被保护跳过：{total_removed - total_mosaic}）"
+    )
+    if not args.dry_run:
+        print(f"[{mode}] 输出目录：{output}")
+    else:
+        print("[提示] 当前为预览模式，未写盘；确认无误请加 --apply。")
+    return 0
+
+
+# =============================================================================
 # 11. 命令行参数
 # =============================================================================
 
@@ -593,6 +832,12 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["yolo", "sam3", "detr", "onnx"],
         default=DEFAULT_MODEL_TYPE,
         help="标注器类型；yolo/sam3/detr 走 supervision 数据集式，onnx 走 ONNX/SAM 两路打标或覆盖",
+    )
+    parser.add_argument(
+        "--detectors-config",
+        default=None,
+        help="多检测器组合的 YAML 配置路径（建议放 src/，不入 git）。指定后走「任意 N 路"
+             "混搭」打标链路（onnx/sam/yolo 可混搭、同类型可多路），忽略 --model-type。",
     )
     parser.add_argument(
         "--model",
@@ -772,6 +1017,10 @@ def main(argv: list[str] | None = None) -> int:
     """脚本主入口，解析参数并执行推理与导出链路。"""
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    # 多检测器组合（任意 N 路混搭）优先：走 YAML 配置驱动的打标链路。
+    if args.detectors_config:
+        return run_detectors(args)
 
     # ONNX 后端走独立流水线（含打码、原地覆盖等），不依赖 supervision。
     if args.model_type == "onnx":
