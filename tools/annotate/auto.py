@@ -32,7 +32,7 @@ if __name__ == "__main__" and __package__ in (None, ""):
 
 DEFAULT_MODEL_TYPE = "yolo"
 DEFAULT_YOLO_MODEL = "yolov8n.pt"
-DEFAULT_SAM3_MODEL = "facebook/sam3"
+DEFAULT_SAM3_MODEL = r"weight\sam3.1_multiplex.pt"
 DEFAULT_SOURCE = "datasets/0024"
 DEFAULT_OUTPUT = "datasets/autolabel"
 DEFAULT_FORMAT = "labelme"
@@ -50,7 +50,12 @@ DEFAULT_COPY_IMAGES = False
 # 2. 常量与类型别名
 # =============================================================================
 
-from tools.core import IMAGE_EXTENSIONS as IMG_EXTS, list_images  # noqa: E402
+from tools.core import (  # noqa: E402
+    IMAGE_EXTENSIONS as IMG_EXTS,
+    detections_to_labelme_dict,
+    list_images,
+    save_labelme,
+)
 
 # 脚本属于工具层，类型仅用于内部提示，不参与运行时检查。
 from typing import TYPE_CHECKING  # noqa: E402
@@ -130,103 +135,77 @@ class YOLOLabeler(AutoLabeler):
 
 
 class SAM3Labeler(AutoLabeler):
-    """基于 Hugging Face Transformers SAM3 的开放词汇分割标注器。
+    """基于本地 ultralytics SAM3 权重的开放词汇分割标注器。
 
-    使用 `facebook/sam3` 作为默认后端，通过文本提示（prompt）对图中所有
-    匹配实例进行实例分割。输出 `sv.Detections` 包含 `mask`、`xyxy`、
-    `confidence` 与 `class_id`（prompt 索引）。
+    使用 ``weight/sam3.1_multiplex.pt``（ultralytics 格式）作为默认后端，
+    通过文本提示（prompt）对图中所有匹配实例做实例分割。一次多提示调用即可
+    拿到带 ``class_id``（= 提示索引）的 ``sv.Detections``。
     """
 
     def __init__(
         self,
-        model_id: str,
+        model_path: str,
         classes: list[str],
         device: str | None,
-        conf_threshold: float = 0.5,
+        conf_threshold: float = 0.25,
     ) -> None:
-        """加载 SAM3 处理器与模型。
+        """加载 SAM3 预测器。
 
         Args:
-            model_id: Hugging Face model id，例如 `facebook/sam3`。
+            model_path: 本地 SAM3 权重路径（ultralytics 格式，如 .pt）。
             classes: 文本提示列表，每个提示对应一个类别。
-            device: 推理设备，如 `cpu`、`cuda`；留空则自动选择。
-            conf_threshold: 掩膜置信度阈值。
+            device: 推理设备，如 ``cpu`` / ``0`` / ``cuda``；留空则自动选择。
+            conf_threshold: 掩膜/框置信度阈值。
         """
-        import torch  # noqa: WPS433 — 延迟导入重型依赖
-        from transformers import Sam3Model, Sam3Processor  # noqa: WPS433
+        from ultralytics.models.sam import SAM3SemanticPredictor
 
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.processor = Sam3Processor.from_pretrained(model_id)
-        self.model = Sam3Model.from_pretrained(model_id).to(self.device)
+        overrides = {
+            "conf": conf_threshold,
+            "task": "segment",
+            "mode": "predict",
+            "model": str(model_path),
+            "save": False,
+            "verbose": False,
+        }
+        if device:
+            overrides["device"] = device
+        self.predictor = SAM3SemanticPredictor(overrides=overrides)
         self.classes = classes
         self.conf_threshold = conf_threshold
 
     def predict(self, image_path: Path) -> DetectionsLike:
-        """对单张图片执行 SAM3 文本提示分割并转换为 `sv.Detections`。
+        """对单张图片执行 SAM3 文本提示分割并转换为 ``sv.Detections``。
 
-        为了明确每个实例对应的类别，这里对每个文本提示分别推理一次，
-        将提示索引作为 `class_id` 写入结果。后续可优化为单次多提示推理。
+        一次传入全部提示，结果的 ``boxes.cls`` 即为提示索引，据此写入
+        ``class_id``，无需对每个提示单独推理。
         """
         import supervision as sv
-        import torch  # noqa: WPS433 — 延迟导入重型依赖
-        from PIL import Image  # noqa: WPS433
 
-        image = Image.open(image_path).convert("RGB")
-        target_size = [image.size[::-1]]
-
-        all_masks: list[npt.NDArray[np.bool_]] = []
-        all_boxes: list[npt.NDArray[np.number]] = []
-        all_scores: list[float] = []
-        all_class_ids: list[int] = []
-
-        for class_id, prompt in enumerate(self.classes):
-            inputs = self.processor(
-                images=image, text=prompt, return_tensors="pt"
-            ).to(self.device)
-
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-
-            result = self.processor.post_process_instance_segmentation(
-                outputs,
-                threshold=self.conf_threshold,
-                mask_threshold=self.conf_threshold,
-                target_sizes=target_size,
-            )[0]
-
-            if not result or "masks" not in result or len(result["masks"]) == 0:
-                continue
-
-            masks = result["masks"].cpu().numpy() > 0
-            num_instances = masks.shape[0]
-            all_masks.extend(masks)
-
-            if "boxes" in result:
-                boxes = result["boxes"].cpu().numpy()
-            else:
-                from supervision.detection.utils.converters import mask_to_xyxy
-
-                boxes = mask_to_xyxy(masks)
-            all_boxes.append(boxes)
-
-            scores = (
-                result["scores"].cpu().numpy()
-                if "scores" in result
-                else np.ones(num_instances, dtype=np.float32)
-            )
-            all_scores.extend(scores.tolist())
-            all_class_ids.extend([class_id] * num_instances)
-
-        if not all_masks:
+        self.predictor.set_image(str(image_path))
+        results = self.predictor(text=self.classes)
+        if not results:
+            return sv.Detections.empty()
+        result = results[0]
+        boxes = getattr(result, "boxes", None)
+        if boxes is None or len(boxes) == 0:
             return sv.Detections.empty()
 
-        xyxy = np.concatenate(all_boxes, axis=0).astype(np.float32)
-        mask = np.stack(all_masks, axis=0)
+        xyxy = boxes.xyxy.cpu().numpy().astype(np.float32)
+        cls = boxes.cls.cpu().numpy().astype(int)
+        conf = (
+            boxes.conf.cpu().numpy().astype(np.float32)
+            if boxes.conf is not None
+            else np.ones(len(xyxy), dtype=np.float32)
+        )
+        # 只保留落在提示类别范围内的结果（过滤异常 cls）。
+        keep = (cls >= 0) & (cls < len(self.classes))
+        xyxy, cls, conf = xyxy[keep], cls[keep], conf[keep]
+        if len(xyxy) == 0:
+            return sv.Detections.empty()
         return sv.Detections(
             xyxy=xyxy,
-            mask=mask,
-            confidence=np.array(all_scores, dtype=np.float32),
-            class_id=np.array(all_class_ids, dtype=int),
+            class_id=cls,
+            confidence=conf,
         )
 
 
@@ -353,33 +332,47 @@ def _unique_stem(path: Path, used: set[str]) -> str:
     return f"{path.stem}_{i}"
 
 
-def _prepare_labelme_dataset(
-    dataset: DatasetLike, output_dir: Path
-) -> DatasetLike:
-    """将图片复制到 `output_dir` 并使用唯一 basename，返回新的 dataset。
+def _export_labelme(dataset: DatasetLike, output_dir: Path) -> None:
+    """将数据集导出为 LabelMe JSON（图片与同名 .json 同目录）。
 
-    LabelMe 要求每张图片与其 `.json` 标注文件同名同目录。当不同子目录存在
-    同名图片时，通过把父目录名拼入文件名来避免 JSON 输出冲突。
+    当前环境 supervision 缺少 ``dataset.formats.labelme`` 模块（见 AGENTS.md
+    §6），因此用 ``tools.core`` 的 ``detections_to_labelme_dict`` +
+    ``save_labelme`` 自行写出矩形框，不依赖缺失的官方接口。不同子目录的
+    同名图片通过 ``_unique_stem`` 去重。
     """
-    import supervision as sv
+    import cv2
 
     used_stems: set[str] = set()
-    new_image_paths: list[str] = []
-    new_annotations: dict[str, sv.Detections] = {}
-    for image_path, _image, detections in dataset:
+    for image_path, image, detections in dataset:
         src = Path(image_path)
         stem = _unique_stem(src, used_stems)
         used_stems.add(stem)
         dst = output_dir / f"{stem}{src.suffix}"
         shutil.copy2(str(src), str(dst))
-        new_path = str(dst.resolve())
-        new_image_paths.append(new_path)
-        new_annotations[new_path] = detections
-    return sv.DetectionDataset(
-        classes=dataset.classes,
-        images=new_image_paths,
-        annotations=new_annotations,
-    )
+
+        if image is not None and getattr(image, "shape", None) is not None:
+            height, width = image.shape[:2]
+        else:
+            loaded = cv2.imread(str(src))
+            height, width = (loaded.shape[:2] if loaded is not None else (0, 0))
+
+        # 将框夹回图像范围内，避免 SAM 给出轻微越界的负坐标。
+        if width > 0 and height > 0 and len(detections) > 0:
+            xyxy = detections.xyxy.copy()
+            xyxy[:, 0] = np.clip(xyxy[:, 0], 0, width)
+            xyxy[:, 1] = np.clip(xyxy[:, 1], 0, height)
+            xyxy[:, 2] = np.clip(xyxy[:, 2], 0, width)
+            xyxy[:, 3] = np.clip(xyxy[:, 3], 0, height)
+            detections.xyxy = xyxy
+
+        data = detections_to_labelme_dict(
+            detections,
+            class_names=dataset.classes,
+            image_path=dst.name,
+            image_width=width,
+            image_height=height,
+        )
+        save_labelme(data, dst.with_suffix(".json"))
 
 
 def export_detection_dataset(
@@ -403,17 +396,15 @@ def export_detection_dataset(
             data_yaml_path=str(output / "data.yaml"),
         )
     elif fmt == "labelme":
-        # LabelMe 图片与 JSON 同目录，且要求 basename 唯一；通过
-        # _prepare_labelme_dataset 复制图片并生成唯一文件名。
+        # LabelMe 图片与 JSON 同目录，且要求 basename 唯一。当前环境
+        # supervision 未提供 labelme 导出模块（见 AGENTS.md §6），改用
+        # tools.core 的桥接函数自行写出。
         if not copy_images:
             print(
                 "[信息] LabelMe 格式需要图片与 JSON 同目录，已自动复制图片到输出目录。",
                 file=sys.stderr,
             )
-        labelme_dataset = _prepare_labelme_dataset(dataset, output)
-        from supervision.dataset.formats.labelme import save_labelme_annotations
-
-        save_labelme_annotations(labelme_dataset, str(output))
+        _export_labelme(dataset, output)
     elif fmt == "coco":
         if copy_images:
             images_dir.mkdir(parents=True, exist_ok=True)
@@ -551,7 +542,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[信息] 文本提示：{prompts}")
         device = args.device or None
         labeler = SAM3Labeler(
-            model_id=model_id,
+            model_path=model_id,
             classes=prompts,
             device=device,
             conf_threshold=args.conf,
