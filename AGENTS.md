@@ -56,7 +56,16 @@ cjet-vision-pipeline/
 │   ├── engine/                    # 各 stage 聚合入口（仿 ultralytics/engine）
 │   │   └── __init__.py            #   re-export 10 个 stage 子包
 │   ├── annotate/                  # 标注阶段
-│   │   ├── auto.py                #   自动/自标注
+│   │   ├── backends/              #   检测器后端（按模型类型分离）
+│   │   │   ├── base.py            #     AutoLabeler 抽象接口 + 类型别名
+│   │   │   ├── onnx.py            #     ONNX 功能（OnnxDetector + YOLO 风格解码）
+│   │   │   ├── sam.py             #     ultralytics SAM（SAMTextDetector / SAM3Labeler）
+│   │   │   ├── yolo.py            #     ultralytics YOLO（YOLOLabeler）
+│   │   │   └── detr.py            #     ultralytics DETR（DETRLabeler，预留）
+│   │   ├── ops.py                 #   打标/覆盖共用底层：框几何 + 打码 + LabelMe IO
+│   │   ├── auto.py                #   打标（supervision 数据集式：YOLO/SAM3/DETR）
+│   │   ├── auto_onnx_sam.py       #   打标（ONNX + SAM 两路 + 打码）
+│   │   ├── reannotate_onnx.py     #   标签覆盖（ONNX 覆盖指定类别 + 保留其它类别）
 │   │   └── merge.py               #   框合并
 │   ├── clean/                     # 清洗阶段
 │   │   ├── blurry.py              #   CleanVision 模糊检测
@@ -241,20 +250,25 @@ if __name__ == "__main__" and __package__ in (None, ""):
     --output datasets\01_annotated ^
     --format labelme
 
-# 新工作流1：SAM 标 hand + yolov5s-lmk.onnx 标 face，LabelMe 输出；
+# 通用标注：ONNX 标一路 + SAM 文本 prompt 标一路，LabelMe 输出；
+# 类别/模型完全由参数决定（示例：ONNX 标 face + SAM 标 hand）；
 # 面积<1% 的小框打马赛克后删除，重叠保留大框的部分不打码（默认预览）
-.conda\python.exe tools\annotate\auto_hand_face.py ^
+.conda\python.exe tools\annotate\auto_onnx_sam.py ^
     --source datasets\raw ^
-    --output datasets\01_annotated_hand_face ^
-    --min-ratio 0.01 --mosaic-block 16
-.conda\python.exe tools\annotate\auto_hand_face.py ^
+    --output datasets\01_annotated_onnx_sam ^
+    --onnx-model weight\yolov5s-lmk.onnx --onnx-label face ^
+    --sam-model weight\sam3.1_multiplex.pt --sam-prompt hand --sam-label hand ^
+    --onnx-min-ratio 0.01 --sam-min-ratio 0.01 --mosaic-block 16
+.conda\python.exe tools\annotate\auto_onnx_sam.py ^
     --source datasets\raw ^
-    --output datasets\01_annotated_hand_face ^
-    --min-ratio 0.01 --mosaic-block 16 --apply
+    --output datasets\01_annotated_onnx_sam ^
+    --onnx-model weight\yolov5s-lmk.onnx --onnx-label face ^
+    --sam-model weight\sam3.1_multiplex.pt --sam-prompt hand --sam-label hand ^
+    --onnx-min-ratio 0.01 --sam-min-ratio 0.01 --mosaic-block 16 --apply
 
 # 该工作流也支持用 tools/workflow.py 跑（临时 cfg 在 src/，不入 git）：
-#   python -m tools.workflow --config src\hand_face_mosaic.yaml --dry-run
-#   python -m tools.workflow --config src\hand_face_mosaic.yaml
+#   python -m tools.workflow --config src\onnx_sam_mosaic.yaml --dry-run
+#   python -m tools.workflow --config src\onnx_sam_mosaic.yaml
 
 # 框合并
 .conda\python.exe tools\annotate\merge.py ^
@@ -374,7 +388,7 @@ python -m tools.workflow --config src\recover_yolo0708.yaml --from-stage inherit
 ### 5.4 测试
 
 > 测试统一收在 `tests/` 下：`tests/` 根目录放独立测试（如 `test_torch_cuda.py` 校验
-> torch/CUDA、`test_reannotate_face_hand_onnx.py` 校验 onnxruntime 能否在 CPU/GPU 上
+> torch/CUDA、`test_onnx_execution_provider.py` 校验 onnxruntime 能否在 CPU/GPU 上
 > 真实推理），`tests/tools/<stage>/` 放按阶段归类的测试。pytest 递归收集，
 > 直接跑 `tests/` 即可覆盖全部。
 
@@ -393,7 +407,7 @@ python -m tools.workflow --config src\recover_yolo0708.yaml --from-stage inherit
 - **torch / CUDA 测试**：`tests/test_torch_cuda.py` 校验 torch 可导入与 CUDA
   可用性；无 GPU 环境用 `pytest.skip` 跳过 GPU 相关断言，不报错。
 
-- **ONNX CPU/GPU 测试**：`tests/test_reannotate_face_hand_onnx.py` 用真实
+- **ONNX CPU/GPU 测试**：`tests/test_onnx_execution_provider.py` 用真实
   `onnxruntime` 验证模型可在 `CPUExecutionProvider` 上推理，存在
   `CUDAExecutionProvider` 时再验证 GPU 推理；缺 `onnxruntime` 时整体
   `pytest.importorskip` 跳过，无 CUDA 时 GPU 用例 `pytest.skip` 跳过。

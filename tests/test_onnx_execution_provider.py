@@ -6,15 +6,15 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-# 允许以 `python tests/test_reannotate_face_hand_onnx.py` 直接运行 / pytest 发现。
+# 允许以 `python tests/test_onnx_execution_provider.py` 直接运行 / pytest 发现。
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # 本测试专门验证 onnxruntime 能否在 CPU / GPU(CUDA) 上加载并真正执行推理；
 # 环境缺少 onnxruntime 时整体跳过，避免误报。
 ort = pytest.importorskip("onnxruntime")
 
-# 复用项目内「人脸/手势重标注」ONNX 的 provider 选择逻辑，对齐真实运行环境。
-from tools.annotate.reannotate_face_hand_onnx import (  # noqa: E402
+# 复用项目内通用 ONNX 检测的 provider 选择逻辑，对齐真实运行环境。
+from tools.annotate.backends.onnx import (  # noqa: E402
     get_available_execution_providers,
     resolve_execution_providers,
 )
