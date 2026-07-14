@@ -1050,7 +1050,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "--apply", dest="dry_run", action="store_false",
         help="真正写盘（图片打码 + 写 JSON）；默认仅统计预览（ONNX 模式）。",
     )
-    parser.set_defaults(dry_run=False)
+    # 默认 dry_run=True（仅统计预览），加 --apply 才写盘；与上面 help 文案一致。
+    # 若写成 False，则不加 --apply 也会直接写盘，与"默认仅统计预览"预期相反。
+    parser.set_defaults(dry_run=True)
     return parser
 
 

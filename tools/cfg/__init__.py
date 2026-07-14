@@ -67,6 +67,12 @@ def load_config(path: Path) -> dict:
     """
     path = Path(path)
     suffix = path.suffix.lower()
+    # 允许 .yaml.example / .yml.example 这类「示例」后缀按 YAML 解析，
+    # 方便直接 --config 预览，不必先复制成 .yaml。
+    if suffix == ".example":
+        stem = path.stem.lower()
+        if stem.endswith(".yaml") or stem.endswith(".yml"):
+            suffix = ".yaml"
     text = path.read_text(encoding="utf-8")
     if suffix in (".yaml", ".yml"):
         try:
@@ -180,16 +186,23 @@ def resolve_config(project_path: Path | None = None) -> dict:
             if name in stage_pool
         ]
     else:
-        stages: list[dict] = []
-        seen_stage_names: set[str] = set()
+        # 字段级合并：项目层（后加载）按 name 覆盖单个键（如 order / enabled /
+        # command），其余键（如 workflow.yaml 提供的 command）保留；先出现的
+        # name 决定整体顺序。这样示例配置才能给 workflow.yaml 的同名 stage
+        # 追加 order / enabled 而不会被忽略。
+        stages_pool: dict[str, dict] = {}
+        seen_order: list[str] = []
         for layer in layers:
             for stage in layer.get("stages", []) or []:
                 name = stage.get("name", "")
-                if name in seen_stage_names:
+                if not name:
                     continue
-                stages.append(stage)
-                seen_stage_names.add(name)
-        merged["stages"] = stages
+                if name in stages_pool:
+                    stages_pool[name] = {**stages_pool[name], **stage}
+                else:
+                    stages_pool[name] = dict(stage)
+                    seen_order.append(name)
+        merged["stages"] = [stages_pool[n] for n in seen_order]
     return merged
 
 
