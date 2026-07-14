@@ -63,9 +63,7 @@ cjet-vision-pipeline/
 │   │   │   ├── yolo.py            #     ultralytics YOLO（YOLOLabeler）
 │   │   │   └── detr.py            #     ultralytics DETR（DETRLabeler，预留）
 │   │   ├── ops.py                 #   打标/覆盖共用底层：框几何 + 打码 + LabelMe IO
-│   │   ├── auto.py                #   打标（supervision 数据集式：YOLO/SAM3/DETR）
-│   │   ├── auto_onnx_sam.py       #   打标（ONNX + SAM 两路 + 打码）
-│   │   ├── reannotate_onnx.py     #   标签覆盖（ONNX 覆盖指定类别 + 保留其它类别）
+│   │   ├── auto.py                #   统一标注入口：supervision 后端（YOLO/SAM3/DETR）+ ONNX 后端（两路打标 / 覆盖，打码抽到 ops.apply_blackout）
 │   │   └── merge.py               #   框合并
 │   ├── clean/                     # 清洗阶段
 │   │   ├── blurry.py              #   CleanVision 模糊检测
@@ -186,7 +184,7 @@ if __name__ == "__main__" and __package__ in (None, ""):
   其中：
   - 检测器后端（onnx / sam / yolo / detr）改 `tools/annotate/backends/` 对应文件；
   - 框几何 / 打码 / LabelMe IO 等共用底层改 `tools/annotate/ops.py`；
-  - 编排层（`auto.py` / `auto_onnx_sam.py` / `reannotate_onnx.py`）只做流程拼装，
+  - 编排层（`auto.py`）只做流程拼装，
     不要在这些文件里重新实现后端或底层几何逻辑；
 - 改工作流前先读 [workflow.md](workflow.md) 和 [workflow_config.yaml.example](workflow_config.yaml.example)；
 - 改任何公共逻辑时，**同步检查是否有别的脚本调用了旧 API**。
@@ -240,9 +238,9 @@ if __name__ == "__main__" and __package__ in (None, ""):
    - 两类编排都从这里 import，不要在编排层重复实现。
 
 3. **编排层（顶层）**
-   - `auto.py`：打标（supervision 数据集式，YOLO / SAM3 / DETR）。
-   - `auto_onnx_sam.py`：打标（ONNX + SAM 两路 + 打码）。
-   - `reannotate_onnx.py`：标签覆盖（ONNX 覆盖指定类别 + 保留其它类别）。
+   - `auto.py`：统一标注入口。`--model-type yolo|sam3|detr` 走 supervision 数据集式；
+     `--model-type onnx` 走 ONNX 后端——ONNX 一路（可选 SAM 第二路）两路打标，或加
+     `--reannotate` 覆盖指定类别并保留其它类别；打码统一由 `ops.apply_blackout` 完成。
    - `merge.py`：框合并。
 
 新增检测器后端时，**只在 `backends/` 加一个文件并实现 `AutoLabeler` 接口**，再在编排层按需调用；
@@ -286,13 +284,13 @@ if __name__ == "__main__" and __package__ in (None, ""):
 # 通用标注：ONNX 标一路 + SAM 文本 prompt 标一路，LabelMe 输出；
 # 类别/模型完全由参数决定（示例：ONNX 标 face + SAM 标 hand）；
 # 面积<1% 的小框打马赛克后删除，重叠保留大框的部分不打码（默认预览）
-.conda\python.exe tools\annotate\auto_onnx_sam.py ^
+.conda\python.exe tools\annotate\auto.py --model-type onnx ^
     --source datasets\raw ^
     --output datasets\01_annotated_onnx_sam ^
     --onnx-model weight\yolov5s-lmk.onnx --onnx-label face ^
     --sam-model weight\sam3.1_multiplex.pt --sam-prompt hand --sam-label hand ^
     --onnx-min-ratio 0.01 --sam-min-ratio 0.01 --mosaic-block 16
-.conda\python.exe tools\annotate\auto_onnx_sam.py ^
+.conda\python.exe tools\annotate\auto.py --model-type onnx ^
     --source datasets\raw ^
     --output datasets\01_annotated_onnx_sam ^
     --onnx-model weight\yolov5s-lmk.onnx --onnx-label face ^

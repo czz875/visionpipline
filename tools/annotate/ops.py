@@ -144,6 +144,10 @@ def concat_boxes(box_groups: Iterable[np.ndarray]) -> np.ndarray:
     return np.concatenate(parts, axis=0).astype(np.float32)
 
 
+# 默认马赛克块大小（像素），越大越糊。
+DEFAULT_MOSAIC_BLOCK = 16
+
+
 # =============================================================================
 # 2. 打码
 # =============================================================================
@@ -184,6 +188,33 @@ def mosaic_region(
     mosaic = cv2.resize(small, (w, h), interpolation=cv2.INTER_NEAREST)
     image[y1:y2, x1:x2] = mosaic
     return image
+
+
+def apply_blackout(
+    image: np.ndarray,
+    removed_boxes: np.ndarray,
+    kept_boxes: np.ndarray,
+    *,
+    use_mosaic: bool = False,
+    mosaic_block: int = DEFAULT_MOSAIC_BLOCK,
+    apply: bool = True,
+) -> tuple[np.ndarray, int]:
+    """对小框区域打码（马赛克或纯黑）后返回图像与打码区域数。
+
+    仅对「待删除小框」中不与「保留大框」重叠的残余区域打码（重叠保护由
+    ``collect_blackout_regions`` 处理）。打码策略由 ``use_mosaic`` 决定：
+    ``True`` 用 ``mosaic_region``，``False`` 用 ``blackout_region``。
+
+    ``apply=False`` 时只计算并返回打码区域数、不修改图像（供预览统计）。
+    """
+    regions = collect_blackout_regions(removed_boxes, kept_boxes)
+    if apply:
+        for box in regions:
+            if use_mosaic:
+                image = mosaic_region(image, box, mosaic_block)
+            else:
+                image = blackout_region(image, box)
+    return image, len(regions)
 
 
 # =============================================================================
