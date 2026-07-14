@@ -22,8 +22,8 @@
 | 项目根目录 | `d:\PycharmProjects\cjet-vision-pipeline` |
 | Python 解释器 | `.conda\python.exe`（项目自带的便携式 Python，不依赖系统 Python） |
 | 依赖安装 | `.conda\python.exe -m pip install -r requirements.txt` |
-| 工作流入口 | `.conda\python.exe tools\workflow.py --config tools\cfg\workflow_config.yaml` |
-| 配置示例 | `tools\cfg\workflow_config.yaml.example`（复制为 `tools\cfg\workflow_config.yaml`） |
+| 工作流入口 | `.conda\python.exe tools\workflow.py --config src\workflow_config.yaml`（当前项目级覆盖在 `src/`；也可 `--config tools\cfg\workflow.yaml` 跑系统主工作流） |
+| 配置示例 | `tools\cfg\workflow_config.yaml.example`（复制为 `src\workflow_config.yaml`） |
 | 主要数据目录 | `datasets/`（raw / annotated / split_30 / split_70 / yolo 等） |
 | 训练产物 | `runs/train/`、`archive/` |
 
@@ -34,10 +34,11 @@
 ```text
 cjet-vision-pipeline/
 ├── .conda/                        # 项目自带的便携式 Python 3.11
-├── datasets/                      # 数据集（raw_jpg / raw / yolo / autolabel ...）
+├── datasets/                      # 数据集（raw_jpg / raw / yolo / autolabel / behavior ...）
 ├── runs/                          # yolo detect train 输出
 ├── archive/                       # tools/train/archive.py 生成的每日归档
 ├── weight/                        # 训练好的 YOLO 权重
+├── docs/                          # 文档与参考资料（如 superpowers/）
 ├── tools/                         # 业务脚本（按阶段分组，仿 ultralytics 包结构）
 │   ├── __init__.py                #   顶层 API 导出
 │   ├── core/                      # 公共模块
@@ -51,8 +52,7 @@ cjet-vision-pipeline/
 │   │   ├── default.yaml           #   系统默认（paths / parameters / log_file）
 │   │   ├── workflow.yaml          #   系统主工作流 stage 定义
 │   │   ├── inherit_yolo.yaml      #   任务专项：接续 + 重命名 + 转 YOLO（走 stages_only）
-│   │   ├── workflow_config.yaml           #   项目级覆盖入口（默认入口）
-│   │   └── workflow_config.yaml.example   #   项目级覆盖示例
+│   │   └── workflow_config.yaml.example   #   项目级覆盖示例（复制为 src/workflow_config.yaml）
 │   ├── engine/                    # 各 stage 聚合入口（仿 ultralytics/engine）
 │   │   └── __init__.py            #   re-export 10 个 stage 子包
 │   ├── annotate/                  # 标注阶段
@@ -72,6 +72,7 @@ cjet-vision-pipeline/
 │   │   ├── orphan_json.py         #   孤儿 JSON
 │   │   └── orphan_images.py       #   缺失 JSON 的图片
 │   ├── label/                     # 标签处理
+│   │   ├── align_labelme.py       #   PNG/JSON 错位一键对齐（见 §6 约束）
 │   │   ├── replace.py             #   批量标签替换
 │   │   └── fix_labelme.py         #   修复 LabelMe JSON 常见损坏
 │   ├── split/                     # 拆分阶段
@@ -95,12 +96,13 @@ cjet-vision-pipeline/
 ├── src/                           # 本地入口 + 临时工作流（被 .gitignore 整体忽略，不入 git）
 │   ├── run.py                     #   临时工作流统一入口（按需切换 cfg；默认 dry_run=True）
 │   ├── main.py                    #   详细参数版入口（Python 函数式）
-│   └── *.yaml                     #   临时工作流 cfg（命名：<功能>.yaml，如 recover_yolo0708.yaml）
+│   ├── run_*.py                   #   任务专项入口变体（如 run_hand_face_714.py / run_clean_behavior_to_yolo.py）
+│   ├── _run_hand.py               #   内部入口脚本
+│   ├── workflow_config.yaml       #   当前项目级覆盖入口（--config 传入；见 §4.9）
+│   └── *.yaml                     #   临时工作流 cfg（命名：<功能>.yaml，如 clean_behavior_to_yolo.yaml / recover_yolo0708.yaml）
 ├── workflow.md                    # 工作流说明文档
-├── workflow_config.yaml           # 项目级覆盖入口（与 tools/cfg/workflow.yaml 配合）
-├── workflow_config.yaml.example   # 迁移提示（指向 tools/cfg/）
 ├── requirements.txt               # 依赖清单
-├── AGENTS.md                      # 本文件
+└── AGENTS.md                      # 本文件
 ```
 
 ---
@@ -180,7 +182,12 @@ if __name__ == "__main__" and __package__ in (None, ""):
 
 ### 4.7 改动前先看相关文件
 
-- 改 `tools/annotate/auto.py` 前先读它和 `tools/core/` 下的公共模块；
+- 改 `tools/annotate/` 下的打标 / 覆盖脚本前，先看 `tools/core/` 公共模块；
+  其中：
+  - 检测器后端（onnx / sam / yolo / detr）改 `tools/annotate/backends/` 对应文件；
+  - 框几何 / 打码 / LabelMe IO 等共用底层改 `tools/annotate/ops.py`；
+  - 编排层（`auto.py` / `auto_onnx_sam.py` / `reannotate_onnx.py`）只做流程拼装，
+    不要在这些文件里重新实现后端或底层几何逻辑；
 - 改工作流前先读 [workflow.md](workflow.md) 和 [workflow_config.yaml.example](workflow_config.yaml.example)；
 - 改任何公共逻辑时，**同步检查是否有别的脚本调用了旧 API**。
 
@@ -214,6 +221,32 @@ if __name__ == "__main__" and __package__ in (None, ""):
   入口脚本是否新建 `<功能>.py` / `src/run_<功能>.py` **按需求询问创建**：
   默认复用 `src/run.py` 切换 cfg 即可；如下游有独立参数 / 独立 dry_run
   默认值 / 多入口并存需求，再询问用户是否新建。
+
+### 4.10 annotate 模块分层约定
+
+`tools/annotate/` 把「检测器后端」与「打标 / 标签覆盖编排」彻底分离，三层职责如下：
+
+1. **`backends/` —— 检测器后端（按模型类型分文件）**
+   - `base.py`：`AutoLabeler` 抽象接口 + 类型别名（`DetectionsLike` / `DatasetLike`）。
+   - `onnx.py`：`OnnxDetector`（ONNX 推理 + YOLO 风格预处理 / 解码 / execution provider）。
+   - `sam.py`：`SAMTextDetector`（numpy 框）、`SAM3Labeler`（返回 `sv.Detections`）。
+   - `yolo.py`：`YOLOLabeler`（ultralytics YOLO）。
+   - `detr.py`：`DETRLabeler`（ultralytics DETR，预留占位）。
+   - 每个后端只负责「加载模型 + `predict()` 出检测结果」，不碰框几何 / 打码 / 文件 IO。
+
+2. **`ops.py` —— 打标 / 覆盖共用底层**
+   - 框几何：`sanitize_boxes` / `split_boxes_by_ratio` / `concat_boxes` / `extract_existing_label_boxes`。
+   - 打码：`mosaic_region` / `collect_blackout_regions` / `blackout_region` / `rewrite_labelme_dict`。
+   - 两类编排都从这里 import，不要在编排层重复实现。
+
+3. **编排层（顶层）**
+   - `auto.py`：打标（supervision 数据集式，YOLO / SAM3 / DETR）。
+   - `auto_onnx_sam.py`：打标（ONNX + SAM 两路 + 打码）。
+   - `reannotate_onnx.py`：标签覆盖（ONNX 覆盖指定类别 + 保留其它类别）。
+   - `merge.py`：框合并。
+
+新增检测器后端时，**只在 `backends/` 加一个文件并实现 `AutoLabeler` 接口**，再在编排层按需调用；
+不要把新后端的推理逻辑塞进 `ops.py` 或某个编排脚本里。
 
 ---
 
@@ -341,12 +374,12 @@ if __name__ == "__main__" and __package__ in (None, ""):
 
 - `tools/cfg/default.yaml`：系统默认（paths / parameters / log_file）
 - `tools/cfg/workflow.yaml`：系统主工作流（20 个 stage）
-- `tools/cfg/workflow_config.yaml`：项目级覆盖入口（**默认入口**）
+- `tools/cfg/workflow_config.yaml`：`resolve_config()` 的默认查找路径（当前实际覆盖文件在 `src/workflow_config.yaml`，经 `--config` 传入）
 - `tools/cfg/workflow_config.yaml.example`：项目级覆盖示例
 - `tools/cfg/inherit_yolo.yaml`：任务专项精简版（接续 + 重命名 + 转 YOLO，5 个 stage）
 
-`tools/workflow.py` 默认从 `tools/cfg/workflow_config.yaml` 加载，自动
-叠加 `default.yaml` + `workflow.yaml` + `workflow_config.yaml` 三层。
+`tools/workflow.py` 经 `--config` 加载项目覆盖（当前为 `src/workflow_config.yaml`），自动
+叠加 `default.yaml` + `workflow.yaml` + 项目覆盖三层（`resolve_config` 的默认查找路径是 `tools/cfg/workflow_config.yaml`）。
 
 **任务专项精简工作流**（`stages_only` 机制）：
 
