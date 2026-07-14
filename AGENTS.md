@@ -46,15 +46,17 @@ cjet-vision-pipeline/
 │   │   ├── images.py              #   list_images 等
 │   │   ├── labelme.py             #   LabelMe JSON 扫描/读写
 │   │   ├── geometry.py            #   矩形/合并/距离工具
+│   │   ├── README.md              #   公共模块使用说明
 │   │   └── __init__.py            #   统一对外导出
 │   ├── cfg/                       # 工作流配置（仿 ultralytics/cfg）
 │   │   ├── __init__.py            #   load_config / resolve_config / substitute_variables
 │   │   ├── default.yaml           #   系统默认（paths / parameters / log_file）
 │   │   ├── workflow.yaml          #   系统主工作流 stage 定义
 │   │   ├── inherit_yolo.yaml      #   任务专项：接续 + 重命名 + 转 YOLO（走 stages_only）
+│   │   ├── detectors.yaml.example #   多检测器组合标注模板（--detectors-config 引用，见 §4.10）
 │   │   └── workflow_config.yaml.example   #   项目级覆盖示例（复制为 src/workflow_config.yaml）
 │   ├── engine/                    # 各 stage 聚合入口（仿 ultralytics/engine）
-│   │   └── __init__.py            #   re-export 10 个 stage 子包
+│   │   └── __init__.py            #   把 10 个同级 stage 包（annotate/augment/.../train）re-export 到 tools.engine 命名空间（engine 自身无子包）
 │   ├── annotate/                  # 标注阶段
 │   │   ├── backends/              #   检测器后端（按模型类型分离）
 │   │   │   ├── base.py            #     AutoLabeler 抽象接口 + 类型别名
@@ -120,7 +122,16 @@ cjet-vision-pipeline/
 每个脚本最上面必须有「默认参数」常量区（`DEFAULT_*`），`argparse` 的
 `default=` 与 `help` 文本、模型加载回退值等全部引用这些常量。
 
-示例见本文件 §4.2（默认参数集中到文件顶部）。
+参考实现见 `tools/annotate/auto.py` 顶部（`DEFAULT_ONNX_CONF` 等一串 `DEFAULT_*`），
+形式如下：
+
+```python
+# 默认参数（集中放文件顶部，argparse / 模型回退统一引用）
+DEFAULT_ONNX_CONF = 0.5
+DEFAULT_ONNX_MIN_RATIO = 0.01
+DEFAULT_MOSAIC_BLOCK = 16
+```
+
 
 ### 4.3 优先调用官方库接口（supervision / cleanvision）
 
@@ -233,7 +244,8 @@ if __name__ == "__main__" and __package__ in (None, ""):
    - 每个后端只负责「加载模型 + `predict()` 出检测结果」，不碰框几何 / 打码 / 文件 IO。
 
 2. **`ops.py` —— 打标 / 覆盖共用底层**
-   - 框几何：`sanitize_boxes` / `split_boxes_by_ratio` / `concat_boxes` / `extract_existing_label_boxes`。
+   - 框几何：`clip_box`（裁剪越界框）/ `classify_box_by_ratio`（按面积占比切保留·删除）/
+     `sanitize_boxes` / `split_boxes_by_ratio` / `concat_boxes` / `extract_existing_label_boxes`。
    - 打码：`mosaic_region` / `collect_blackout_regions` / `blackout_region` / `rewrite_labelme_dict`。
    - 两类编排都从这里 import，不要在编排层重复实现。
 
@@ -469,9 +481,9 @@ python -m tools.workflow --config src\recover_yolo0708.yaml --from-stage inherit
   `images/` + `labels/` 分离结构；`tools/convert/yolo_to_labelme.py` 的
   `--labels` 要指向 `labels/`。
 
-- **优先使用本地开发版 supervision**：`tools/annotate/auto.py` 顶部会
-  把 `src/` 加入 `sys.path`，所以如果你在 `src/supervision/` 下改过代码，
-  直接运行脚本就能生效，不需要重装。
+- **`src/` 会被插入 `sys.path`**：`tools/annotate/auto.py` 顶部会把项目 `src/`
+  目录插入 `sys.path` 首位。若日后在 `src/` 下放置本地开发版库（如 `src/supervision/`），
+  直接运行脚本即可覆盖安装版生效，无需重装。（当前 `src/` 下尚无此类覆盖目录。）
 
 - **rename 不动 JSON 的 mtime 排序**：`tools/rename/timestamp_rename.py`
   只对 PNG/JPG 按 mtime 排序改名；LabelMe JSON 不参与排序（它的 mtime
