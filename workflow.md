@@ -35,7 +35,7 @@ JPG 原始数据（可选）──► tools/convert/jpg_to_png.py ──► PNG
 补充 PNG 数据（固定尺寸，由 project.image_width/height 控制）
     │
     ▼
-SAM / YOLO 自动标注 ──► LabelMe JSON
+多后端自动标注（YOLO / SAM3 / DETR / ONNX）──► LabelMe JSON
     │
     ▼
 标注框合并（tools/annotate/merge.py）
@@ -86,10 +86,11 @@ SAM / YOLO 自动标注 ──► LabelMe JSON
 | 数据备份 | [tools/backup/snapshot.py](tools/backup/snapshot.py) | 把指定目录打成带时间戳的 .tar.gz 备份 |
 | 数据接续 | [tools/merge/inherit_dataset.py](tools/merge/inherit_dataset.py) | 把 autolabel 平铺数据按 1000/批接续到 behavior 的新 batch，按 JSON label 归类到 8 个分类子目录 |
 | LabelMe 修复 | [tools/label/fix_labelme.py](tools/label/fix_labelme.py) | 修复 LabelMe JSON 常见损坏（imagePath / 矩形 / 尺寸） |
+| 标签对齐 | [tools/label/align_labelme.py](tools/label/align_labelme.py) | 把 PNG / LabelMe JSON 按 JSON 内 imagePath 字段对齐（basename 一致）+ 同步 imagePath；补救改名 / 接续后的 PNG-JSON 错位 |
 | 批量改名 | [tools/rename/timestamp_rename.py](tools/rename/timestamp_rename.py) | 按时间戳改名为 YYYYMMDD_HHMMSS_NNNNNN，可选同步 LabelMe JSON 的 imagePath |
 | JPG → PNG | [tools/convert/jpg_to_png.py](tools/convert/jpg_to_png.py) | 把原始 JPG 批量转 PNG（可选），同时修复同名 LabelMe JSON |
 | IR 增强 | [tools/augment/ir_enhance.py](tools/augment/ir_enhance.py) | 对 IR 数据做全局 + 局部光照增强（可选，按类别过滤） |
-| 自动标注 | [tools/annotate/auto.py](tools/annotate/auto.py) | YOLO / SAM3 生成标注 |
+| 自动标注 | [tools/annotate/auto.py](tools/annotate/auto.py) | 多后端标注：YOLO / SAM3 / DETR 数据集式导出，或 ONNX 一路+SAM 两路打标 / 覆盖，或多检测器组合（`--detectors-config`），输出 YOLO/LabelMe/COCO |
 | 框合并 | [tools/annotate/merge.py](tools/annotate/merge.py) | 合并邻近同标签矩形框 |
 | 模糊检测 | [tools/clean/blurry.py](tools/clean/blurry.py) | CleanVision 检测模糊目标区域并移出原图 |
 | 丢弃不合格 | [tools/clean/orphan_json.py](tools/clean/orphan_json.py)<br>[tools/clean/orphan_images.py](tools/clean/orphan_images.py) | 清理孤儿 JSON / 缺失 JSON 的图片 |
@@ -102,6 +103,53 @@ SAM / YOLO 自动标注 ──► LabelMe JSON
 | 归档 | [tools/train/archive.py](tools/train/archive.py) | 按时间戳归档训练产物 |
 | 打包 | [tools/train/create_tar_gz.py](tools/train/create_tar_gz.py) | 把归档目录压缩为 .tar.gz，方便交付 |
 | 公共模块 | [tools/core/](tools/core/) | 常量、LabelMe 读写、几何工具等 |
+
+---
+
+## 自动标注：多后端 / ONNX 打码覆盖 / 多检测器组合
+
+统一入口是 [tools/annotate/auto.py](tools/annotate/auto.py)，按 `--model-type` /
+`--detectors-config` 走不同链路，三类能力并存：
+
+### 1. supervision 数据集式（yolo / sam3 / detr）
+
+- `--model-type yolo|sam3|detr`：模型推理 → `sv.Detections` → 类别 / 置信度过滤 →
+  累积为 `sv.DetectionDataset` → 导出 YOLO / LabelMe / COCO（`--format`）。
+- DETR 走 ultralytics RT-DETR（`DETRLabeler`），接口与 YOLO 一致。
+
+### 2. ONNX 打标 / 覆盖（onnx）
+
+- 一路 ONNX（可选 SAM 文本 prompt 第二路）标新框 → 按面积占比切分保留 / 删除框 →
+  小框打码（默认马赛克，重叠保护）后删除 → 输出 LabelMe。**默认仅统计预览**，
+  加 `--apply` 才写盘。
+- 加 `--reannotate`：覆盖指定类别并保留其它现有类别，原地覆盖图片与 JSON
+  （覆盖模式默认纯黑打码）。
+
+### 3. 多检测器组合（--detectors-config）
+
+- `--detectors-config src/detectors.yaml`：任意 N 路混搭（onnx / sam / yolo / detr，
+  可同类型多路），每路各自推理出「框 + 逐框标签」，统一走「合并保留大框 → 逐路
+  小框打码（重叠保护）→ 输出 LabelMe」。默认预览，加 `--apply` 写盘。
+- 配置模板见 [tools/cfg/detectors.yaml.example](tools/cfg/detectors.yaml.example)；
+  任务专项配置放 `src/`（不入 git，见下文）。
+
+常用命令（更多见 [AGENTS.md](AGENTS.md) §5.2）：
+
+```bash
+# YOLO 标注 → LabelMe
+.conda\python.exe tools\annotate\auto.py --model-type yolo ^
+    --source datasets\raw --output datasets\01_annotated --format labelme
+
+# ONNX 一路 + SAM 第二路，默认预览（加 --apply 才写盘）
+.conda\python.exe tools\annotate\auto.py --model-type onnx ^
+    --source datasets\raw --output datasets\01_annotated_onnx_sam ^
+    --onnx-model weight\yolov5s-lmk.onnx --onnx-label face ^
+    --sam-model weight\sam3.1_multiplex.pt --sam-prompt hand --sam-label hand ^
+    --onnx-min-ratio 0.01 --sam-min-ratio 0.01 --mosaic-block 16
+
+# 多检测器组合（cfg 放 src/，默认预览，--apply 写盘）
+.conda\python.exe tools\annotate\auto.py --detectors-config src\detectors.yaml --apply
+```
 
 ---
 
@@ -307,3 +355,15 @@ stages_only:
 
 如果需要覆盖 paths（备份目录 / autolabel / behavior），在同 yaml 加 `paths:` 段即可
 （不写就回退到 `tools/cfg/default.yaml` 里的默认值）。
+
+> **任务专项 / 临时工作流约定（关键）**：一次性 / 临时 cfg **不要** 写进
+> `tools/cfg/`，而是放到 `src/`（`src/` 被 `.gitignore` 整体忽略，不入 git）。
+> 优先用 `stages_only` 引用 `workflow.yaml` 已有 stage（参考 `inherit_yolo.yaml`
+> 风格）；只有现有 stage 拼不出来时，才在 `src/` 的 cfg 里直接定义 stage 命令。
+>
+> 两个参考模板：
+> - [tools/cfg/all_modules.yaml.example](tools/cfg/all_modules.yaml.example)：
+>   全部模块「用法总表」，每个 `tools/` 脚本对应一个 stage，带 `enabled` / `order`，
+>   可作为拼装参考。
+> - [tools/cfg/detectors.yaml.example](tools/cfg/detectors.yaml.example)：
+>   多检测器组合标注的 YAML 模板（`--detectors-config` 引用，见上）。
