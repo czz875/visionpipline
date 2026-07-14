@@ -48,3 +48,4 @@ venv/
 src/
 docs/
 .worktrees/
+.codebuddy/

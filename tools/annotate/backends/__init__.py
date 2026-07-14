@@ -7,7 +7,7 @@ tools.annotate.backends
 - ``onnx``  —— 通用 ONNX 检测（``OnnxDetector`` + YOLO 风格解码适配）
 - ``sam``   —— ultralytics SAM 文本 prompt（``SAMTextDetector`` / ``SAM3Labeler``）
 - ``yolo``  —— ultralytics YOLO（``YOLOLabeler``）
-- ``detr``  —— ultralytics DETR（``DETRLabeler``，预留）
+- ``detr``  —— ultralytics DETR（``DETRLabeler``，RT-DETR 实现）
 
 ``AutoLabeler`` 抽象接口与类型别名见 ``base``。
 """

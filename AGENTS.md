@@ -63,7 +63,7 @@ cjet-vision-pipeline/
 │   │   │   ├── onnx.py            #     ONNX 功能（OnnxDetector + YOLO 风格解码）
 │   │   │   ├── sam.py             #     ultralytics SAM（SAMTextDetector / SAM3Labeler）
 │   │   │   ├── yolo.py            #     ultralytics YOLO（YOLOLabeler）
-│   │   │   └── detr.py            #     ultralytics DETR（DETRLabeler，预留）
+│   │   │   └── detr.py            #     ultralytics DETR（DETRLabeler，RT-DETR 实现）
 │   │   ├── ops.py                 #   打标/覆盖共用底层：框几何 + 打码 + LabelMe IO
 │   │   ├── auto.py                #   统一标注入口：supervision 后端（YOLO/SAM3/DETR）+ ONNX 后端（两路打标 / 覆盖）+ 多检测器组合（--detectors-config 任意 N 路混搭，打码抽到 ops.apply_blackout）
 │   │   └── merge.py               #   框合并
@@ -240,12 +240,12 @@ if __name__ == "__main__" and __package__ in (None, ""):
    - `onnx.py`：`OnnxDetector`（ONNX 推理 + YOLO 风格预处理 / 解码 / execution provider）。
    - `sam.py`：`SAMTextDetector`（numpy 框）、`SAM3Labeler`（返回 `sv.Detections`）。
    - `yolo.py`：`YOLOLabeler`（ultralytics YOLO）。
-   - `detr.py`：`DETRLabeler`（ultralytics DETR，预留占位）。
+   - `detr.py`：`DETRLabeler`（ultralytics RT-DETR，与 YOLOLabeler 接口一致）。
    - 每个后端只负责「加载模型 + `predict()` 出检测结果」，不碰框几何 / 打码 / 文件 IO。
 
 2. **`ops.py` —— 打标 / 覆盖共用底层**
    - 框几何：`clip_box`（裁剪越界框）/ `classify_box_by_ratio`（按面积占比切保留·删除）/
-     `sanitize_boxes` / `split_boxes_by_ratio` / `concat_boxes` / `extract_existing_label_boxes`。
+     `subtract_box_regions` / `collect_blackout_regions` / `concat_boxes` / `extract_existing_label_boxes`。
    - 打码：`mosaic_region` / `collect_blackout_regions` / `blackout_region` / `rewrite_labelme_dict`。
    - 两类编排都从这里 import，不要在编排层重复实现。
 

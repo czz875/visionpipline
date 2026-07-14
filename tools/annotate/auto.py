@@ -42,6 +42,7 @@ if __name__ == "__main__" and __package__ in (None, ""):
 
 DEFAULT_MODEL_TYPE = "yolo"
 DEFAULT_YOLO_MODEL = "yolov8n.pt"
+DEFAULT_DETR_MODEL = "rtdetr-l.pt"
 DEFAULT_SAM3_MODEL = r"weight\sam3.1_multiplex.pt"
 DEFAULT_SOURCE = "datasets/0024"
 DEFAULT_OUTPUT = "datasets/autolabel"
@@ -94,6 +95,7 @@ from tools.annotate.backends import (  # noqa: E402
     AutoLabeler,
     DatasetLike,
     DetectionsLike,
+    DETRLabeler,
     SAM3Labeler,
     YOLOLabeler,
 )
@@ -121,7 +123,7 @@ def ensure_local_supervision_import() -> None:
     在脚本入口处调用一次即可，避免安装版覆盖仓库内的 `as_labelme`、
     `as_coco` 等较新接口。
     """
-    repo_root = Path(__file__).resolve().parent.parent
+    repo_root = Path(__file__).resolve().parent.parent.parent
     src_path = str(repo_root / "src")
     if src_path not in sys.path:
         sys.path.insert(0, src_path)
@@ -464,6 +466,62 @@ def _run_multi_source_annotation(
     return image, final_boxes, final_labels, blackout_total
 
 
+def _write_annotation_result(
+    image: np.ndarray,
+    image_path: Path,
+    image_name: str,
+    boxes: np.ndarray,
+    labels: list[str],
+    output: Path | None,
+) -> None:
+    """把单张标注结果（打码后图像 + 框/标签）写入输出目录的图片与同名 JSON。
+
+    ``output`` 为 ``None`` 时不写盘（调用方负责处理覆盖模式等的原地写盘）。
+    """
+    if output is None:
+        return
+    out_img = output / image_path.name
+    out_json = out_img.with_suffix(".json")
+    cv2.imwrite(str(out_img), image)
+    data = rewrite_labelme_dict(out_json, boxes, labels, image.shape, image_name)
+    save_labelme(data, out_json)
+
+
+def _iter_annotated_images(
+    image_paths: list[Path],
+    build_sources: Callable[[np.ndarray, Path], list["_BoxSource"]],
+    *,
+    use_mosaic: bool,
+    mosaic_block: int,
+    dry_run: bool,
+    output: Path | None,
+):
+    """通用标注循环：推理建源 -> 多源打码合并 -> 写盘，逐张 yield 统计要素。
+
+    ``build_sources(image, image_path)`` 由调用方提供，负责把各检测器输出归一成
+    ``_BoxSource`` 列表（ONNX 一路、SAM 第二路、多检测器组合的差异都封在这里）。
+    循环主体因此在所有「标注模式」间复用，避免重复遍历/写盘逻辑。
+    每个元素 yield ``(image_path, sources, boxes, labels, blackout_count)``。
+    """
+    for image_path in tqdm(image_paths, desc="标注中", unit="img"):
+        image = cv2.imread(str(image_path))
+        if image is None:
+            raise ValueError(f"无法读取图片：{image_path}")
+        sources = build_sources(image, image_path)
+        image, boxes, labels, n = _run_multi_source_annotation(
+            image,
+            sources,
+            use_mosaic=use_mosaic,
+            mosaic_block=mosaic_block,
+            dry_run=dry_run,
+        )
+        if not dry_run:
+            _write_annotation_result(
+                image, image_path, image_path.name, boxes, labels, output
+            )
+        yield image_path, sources, boxes, labels, n
+
+
 def run_onnx(args: argparse.Namespace) -> int:
     """执行 ONNX 打标 / 覆盖（``--model-type onnx``）。
 
@@ -558,35 +616,30 @@ def run_onnx(args: argparse.Namespace) -> int:
     if not args.dry_run and output is not None:
         output.mkdir(parents=True, exist_ok=True)
 
-    total_onnx = total_sam = total_removed = total_mosaic = 0
-    for image_path in tqdm(images, desc="标注中", unit="img"):
-        image = cv2.imread(str(image_path))
-        if image is None:
-            raise ValueError(f"无法读取图片：{image_path}")
+    def _onnx_build_sources(image: np.ndarray, image_path: Path) -> list[_BoxSource]:
+        """ONNX 一路（可选 SAM 第二路）归一成 _BoxSource 列表。"""
         onnx_boxes, _ = onnx_detector.predict(image)
-        sources = [
+        srcs = [
             _build_source(onnx_boxes, args.onnx_label, args.onnx_min_ratio, image.shape)
         ]
         if sam_detector is not None:
             sam_boxes, _ = sam_detector.predict(image_path)
-            sources.append(_build_source(sam_boxes, args.sam_label, args.sam_min_ratio, image.shape))
-        image, boxes, labels, n = _run_multi_source_annotation(
-            image,
-            sources,
-            use_mosaic=use_mosaic,
-            mosaic_block=args.mosaic_block,
-            dry_run=args.dry_run,
-        )
+            srcs.append(_build_source(sam_boxes, args.sam_label, args.sam_min_ratio, image.shape))
+        return srcs
+
+    total_onnx = total_sam = total_removed = total_mosaic = 0
+    for _path, sources, _boxes, _labels, n in _iter_annotated_images(
+        images,
+        _onnx_build_sources,
+        use_mosaic=use_mosaic,
+        mosaic_block=args.mosaic_block,
+        dry_run=args.dry_run,
+        output=output,
+    ):
         total_onnx += len(sources[0].kept)
         total_sam += (len(sources[1].kept) if len(sources) > 1 else 0)
         total_removed += sum(len(s.removed) for s in sources)
         total_mosaic += n
-        if not args.dry_run and output is not None:
-            out_img = output / image_path.name
-            out_json = out_img.with_suffix(".json")
-            cv2.imwrite(str(out_img), image)
-            data = rewrite_labelme_dict(out_json, boxes, labels, image.shape, image_path.name)
-            save_labelme(data, out_json)
 
     mode = "预览" if args.dry_run else "完成"
     print(f"[{mode}] 图片数：{len(images)}")
@@ -629,13 +682,13 @@ def _coerce_score_indices(value) -> tuple[int, ...]:
     return tuple(int(v) for v in value)
 
 
-def _yolo_detect(
-    labeler: "YOLOLabeler",
+def _sv_detect(
+    labeler: AutoLabeler,
     image_path: Path,
     keep_names: set[str],
     rename: str | None,
 ) -> tuple[np.ndarray, list[str]]:
-    """跑一次 YOLO 推理，抽出 xyxy 与逐框类别名。
+    """跑一次 supervision 后端（YOLO / DETR）推理，抽出 xyxy 与逐框类别名。
 
     ``keep_names`` 非空时只保留其中的类别；``rename`` 非空时把保留下来的框
     统一改名为该标签（便于把多类别归并成一个打码/保留类别）。
@@ -665,7 +718,7 @@ def _build_detectors(
 ) -> list[_Detector]:
     """按 YAML 配置逐项构造检测器（模型只加载一次），返回统一封装列表。
 
-    支持 ``onnx`` / ``sam`` / ``yolo`` 混搭且同类型可多路；``detr`` 预留未实现。
+    支持 ``onnx`` / ``sam`` / ``yolo`` / ``detr`` 混搭且同类型可多路。
     每项通用键：``type`` / ``model`` / ``min_ratio`` / ``conf`` / ``name``。
     """
     detectors: list[_Detector] = []
@@ -703,7 +756,7 @@ def _build_detectors(
             def detect(_image, image_path, backend=backend):
                 return backend.predict(image_path)
 
-        elif dtype == "yolo":
+        elif dtype in ("yolo", "detr"):
             predict_kwargs: dict[str, object] = {
                 "conf": float(cfg.get("conf", DEFAULT_CONF)),
                 "iou": float(cfg.get("iou", DEFAULT_IOU)),
@@ -712,15 +765,17 @@ def _build_detectors(
             }
             if device:
                 predict_kwargs["device"] = device
-            backend = YOLOLabeler(str(cfg["model"]), predict_kwargs)
+            backend: AutoLabeler = (
+                YOLOLabeler(str(cfg["model"]), predict_kwargs)
+                if dtype == "yolo"
+                else DETRLabeler(str(cfg["model"]), predict_kwargs)
+            )
             keep_names = {str(c) for c in cfg.get("classes", [])}
             rename = cfg.get("label")
 
             def detect(_image, image_path, backend=backend, keep=keep_names, rename=rename):
-                return _yolo_detect(backend, image_path, keep, rename)
+                return _sv_detect(backend, image_path, keep, rename)
 
-        elif dtype == "detr":
-            raise NotImplementedError("DETR 检测器尚未实现（见 backends/detr.py 预留）")
         else:
             raise ValueError(f"未知检测器类型：{dtype}")
 
@@ -774,31 +829,27 @@ def run_detectors(args: argparse.Namespace) -> int:
 
     per_kept: dict[str, int] = {d.name: 0 for d in detectors}
     total_removed = total_mosaic = 0
-    for image_path in tqdm(images, desc="标注中", unit="img"):
-        image = cv2.imread(str(image_path))
-        if image is None:
-            raise ValueError(f"无法读取图片：{image_path}")
-        sources: list[_BoxSource] = []
+
+    def _det_build_sources(image: np.ndarray, image_path: Path) -> list[_BoxSource]:
+        """各路检测器归一化为 _BoxSource，并累计每路保留框数。"""
+        srcs: list[_BoxSource] = []
         for detector in detectors:
             boxes, labels = detector.detect(image, image_path)
             source_boxes = _build_source(boxes, labels, detector.min_ratio, image.shape)
             per_kept[detector.name] += len(source_boxes.kept)
-            sources.append(source_boxes)
-        image, boxes, labels, n = _run_multi_source_annotation(
-            image,
-            sources,
-            use_mosaic=use_mosaic,
-            mosaic_block=mosaic_block,
-            dry_run=args.dry_run,
-        )
+            srcs.append(source_boxes)
+        return srcs
+
+    for _path, sources, _boxes, _labels, n in _iter_annotated_images(
+        images,
+        _det_build_sources,
+        use_mosaic=use_mosaic,
+        mosaic_block=mosaic_block,
+        dry_run=args.dry_run,
+        output=output,
+    ):
         total_removed += sum(len(s.removed) for s in sources)
         total_mosaic += n
-        if not args.dry_run:
-            out_img = output / image_path.name
-            out_json = out_img.with_suffix(".json")
-            cv2.imwrite(str(out_img), image)
-            data = rewrite_labelme_dict(out_json, boxes, labels, image.shape, image_path.name)
-            save_labelme(data, out_json)
 
     mode = "预览" if args.dry_run else "完成"
     print(f"[{mode}] 图片数：{len(images)}")
@@ -1040,17 +1091,19 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(f"[信息] 共发现 {len(images)} 张图片")
 
+    # YOLO / DETR 共用的推理参数（sam3 走文本 prompt，不在此列）。
+    predict_kwargs: dict[str, object] = {
+        "conf": args.conf,
+        "iou": args.iou,
+        "imgsz": args.imgsz,
+        "verbose": DEFAULT_VERBOSE,
+    }
+    if args.device:
+        predict_kwargs["device"] = args.device
+
     if args.model_type == "yolo":
         model_path = args.model or DEFAULT_YOLO_MODEL
         print(f"[信息] 正在加载 YOLO 模型：{model_path}")
-        predict_kwargs: dict = {
-            "conf": args.conf,
-            "iou": args.iou,
-            "imgsz": args.imgsz,
-            "verbose": DEFAULT_VERBOSE,
-        }
-        if args.device:
-            predict_kwargs["device"] = args.device
         labeler: AutoLabeler = YOLOLabeler(model_path, predict_kwargs)
         keep_ids = parse_class_ids(args.classes, dict(enumerate(labeler.classes)))
         if keep_ids:
@@ -1077,11 +1130,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         keep_ids = None
     elif args.model_type == "detr":
-        print("[错误] DETR 标注器尚未实现", file=sys.stderr)
-        return 1
-    elif args.model_type == "onnx":
-        return run_onnx(args)
+        model_path = args.model or DEFAULT_DETR_MODEL
+        print(f"[信息] 正在加载 RT-DETR 模型：{model_path}")
+        labeler = DETRLabeler(model_path, predict_kwargs)
+        keep_ids = parse_class_ids(args.classes, dict(enumerate(labeler.classes)))
+        if keep_ids:
+            keep_names = [labeler.classes[i] for i in sorted(keep_ids)]
+            print(f"[信息] 仅保留类别：{keep_names}")
     else:
+        # onnx 已在函数开头提前分发，这里只处理未知类型。
         print(f"[错误] 不支持的 model-type：{args.model_type}", file=sys.stderr)
         return 1
 
