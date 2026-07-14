@@ -4,9 +4,8 @@ tools/annotate/ops.py
 打标（annotate）与标签覆盖（reannotate）共用的底层能力，与「具体类别」和
 「具体模型后端」都无关：
 
-- 框几何：clip_box / sanitize_boxes / classify_box_by_ratio /
-  split_boxes_by_ratio / subtract_box_regions / collect_blackout_regions /
-  concat_boxes；
+- 框几何：clip_box / classify_box_by_ratio / subtract_box_regions /
+  collect_blackout_regions / concat_boxes；
 - 打码：blackout_region（纯黑）/ mosaic_region（马赛克）；
 - LabelMe 写出 / 读取：build_labelme_shapes / rewrite_labelme_dict /
   extract_existing_label_boxes。
@@ -47,21 +46,6 @@ def clip_box(box: np.ndarray, image_shape: tuple[int, int, int]) -> np.ndarray:
     return clipped
 
 
-def sanitize_boxes(
-    boxes: np.ndarray, image_shape: tuple[int, int, int]
-) -> np.ndarray:
-    """裁剪并过滤无效框。"""
-    sanitized: list[np.ndarray] = []
-    for box in boxes:
-        clipped = clip_box(box, image_shape)
-        if clipped[2] <= clipped[0] or clipped[3] <= clipped[1]:
-            continue
-        sanitized.append(clipped)
-    if not sanitized:
-        return np.empty((0, 4), dtype=np.float32)
-    return np.array(sanitized, dtype=np.float32)
-
-
 def classify_box_by_ratio(
     box: np.ndarray,
     image_shape: tuple[int, int, int],
@@ -75,24 +59,6 @@ def classify_box_by_ratio(
     x1, y1, x2, y2 = [float(v) for v in box.tolist()]
     box_area = max(0.0, x2 - x1) * max(0.0, y2 - y1)
     return (box_area / image_area) >= min_ratio
-
-
-def split_boxes_by_ratio(
-    boxes: np.ndarray,
-    image_shape: tuple[int, int, int],
-    min_ratio: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    """按面积占比分成保留框与删除框。"""
-    kept: list[np.ndarray] = []
-    removed: list[np.ndarray] = []
-    for box in boxes:
-        if classify_box_by_ratio(box, image_shape, min_ratio):
-            kept.append(box)
-        else:
-            removed.append(box)
-    kept_array = np.array(kept, dtype=np.float32) if kept else np.empty((0, 4), dtype=np.float32)
-    removed_array = np.array(removed, dtype=np.float32) if removed else np.empty((0, 4), dtype=np.float32)
-    return kept_array, removed_array
 
 
 def subtract_box_regions(box: np.ndarray, keep_boxes: np.ndarray) -> np.ndarray:
