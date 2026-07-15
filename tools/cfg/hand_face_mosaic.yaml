@@ -1,0 +1,114 @@
+# =============================================================================
+# tools/cfg/hand_face_mosaic.yaml
+# 备份 datasets/1|2|3 + 脸(ONNX yolov5s-lmk.onnx)/手(SAM) 标注（打码专项工作流）
+#
+# 用法：
+#   # 默认预览（snapshot / auto 各自 dry-run，不写盘）
+#   python tools/workflow.py --config tools/cfg/hand_face_mosaic.yaml --dry-run
+#
+#   # 真跑前建议先 --dry-run 确认；确认无误后给每个 stage 的 command 末尾加 --apply：
+#   python tools/workflow.py --config tools/cfg/hand_face_mosaic.yaml
+#
+# 逻辑（检测 → 合并 → 打码，三步串行）：
+#   1、备份 datasets/1,2,3 到 ${paths.backup_dir}（默认 C:/Users/EDY/Pictures），
+#      三个目录各生成一个带时间戳的 .tar.gz；
+#   2、datasets/phone2 跑一次 ONNX + SAM 两路「只检测」（order 2，--no-blackout）：
+#        ONNX 标 face（yolov5s-lmk.onnx）+ SAM 文本 prompt 标 hand/phone/cigarette，
+#        LabelMe 输出且保留全部框（小框不打码、不删除），供下一步合并；
+#   3、对上一步产出的 datasets/phone2_annotated 做同标签邻近框合并（order 3），
+#      把检测出的零散同标签框合并成大框，减少碎片化；
+#   4、对合并后的 datasets/phone2_annotated 做「小框打码」（order 4，--mosaic-existing）：
+#       按面积占比 < 1% 的小框打成马赛克并从标注删除，大框保留（内置重叠保护）。
+#       SAM 多类别用逗号分隔：
+#          --sam-prompt hand,phone,cigarette --sam-label hand,phone,cigarette
+#
+# 说明：
+#   - 走 stages_only，只跑下面这些 stage，不会触发 workflow.yaml 里的其它 stage。
+#   - 打码是破坏性操作，故各 annotate / mosaic stage 默认不传 --apply（先预览），
+#     确认无误再给 backup / 各 stage 的 command 末尾加 --apply。
+#   - merge.py 自身没有 --apply / dry-run 开关，会直接写盘（破坏性），故它紧跟
+#     在检测之后、打码之前执行，对 datasets/phone2_annotated 直接合并。
+#   - min_ratio 0.01 = 面积占比 < 1% 判为小框；mosaic-block 16 = 马赛克块大小（像素）。
+# =============================================================================
+
+stages_only:
+  - backup_datasets_123
+  - detect_ds1_hand_face
+  - merge_boxes_ds1
+  - mosaic_ds1_hand_face
+  # - detect_ds2_hand_face
+  # - detect_ds3_hand_face
+
+stages:
+  # ---------- 第 1 步：备份 datasets/1,2,3 ----------
+  - name: backup_datasets_123
+    enabled: False
+    order: 1
+    command: >
+      python tools/backup/snapshot.py
+      --sources datasets/1,datasets/2,datasets/3
+      --output-dir ${paths.backup_dir}
+      --apply
+
+  # ---------- 第 2 步：只检测（ONNX face + SAM hand/phone/cigarette，保留全部框） ----------
+  - name: detect_ds1_hand_face
+    enabled: true
+    order: 2
+    command: >
+      python tools/annotate/auto.py --model-type onnx
+      --source datasets/phone2 --output datasets/phone2_annotated
+      --onnx-model weight/yolov5s-lmk.onnx --onnx-label face
+      --sam-model weight/sam3.1_multiplex.pt --sam-prompt hand,phone,cigarette --sam-label hand,phone,cigarette
+      --onnx-min-ratio 0.01 --sam-min-ratio 0.01 --mosaic-block 16
+      --no-blackout
+      --apply
+
+  # ---------- 第 3 步：合并标注框（对 phone2_annotated 做同标签邻近合并） ----------
+  - name: merge_boxes_ds1
+    enabled: true
+    order: 3
+    command: >
+      python tools/annotate/merge.py
+      --json-dir datasets/phone2_annotated
+      --merge-distance-x 100
+      --merge-distance-y 200
+      --max-merge-width 600
+      --max-merge-height 600
+
+  # ---------- 第 4 步：对合并后的标注打码（小框马赛克 + 从标注删除） ----------
+  - name: mosaic_ds1_hand_face
+    enabled: true
+    order: 4
+    command: >
+      python tools/annotate/auto.py --model-type onnx
+      --mosaic-existing
+      --source datasets/phone2_annotated
+      --onnx-min-ratio 0.01 --mosaic-min-ratio 0.01 --mosaic-block 16
+      --apply
+
+  # - name: detect_ds2_hand_face
+  #   enabled: true
+  #   order: 2
+  #   command: >
+  #     python tools/annotate/auto.py --model-type onnx
+  #     --source datasets/2 --output datasets/2_annotated
+  #     --onnx-model weight/yolov5s-lmk.onnx --onnx-label face
+  #     --sam-model weight/sam3.1_multiplex.pt --sam-prompt hand,phone,cigarette --sam-label hand,phone,cigarette
+  #     --onnx-min-ratio 0.01 --sam-min-ratio 0.01 --mosaic-block 16
+  #     --no-blackout
+  #     --apply
+  # # 之后接 merge_boxes（改 --json-dir datasets/2_annotated）与 mosaic-existing（--source datasets/2_annotated）
+
+  # - name: detect_ds3_hand_face
+  #   enabled: true
+  #   order: 2
+  #   command: >
+  #     python tools/annotate/auto.py --model-type onnx
+  #     --source datasets/3 --output datasets/3_annotated
+  #     --onnx-model weight/yolov5s-lmk.onnx --onnx-label face
+  #     --sam-model weight/sam3.1_multiplex.pt --sam-prompt hand,phone,cigarette --sam-label hand,phone,cigarette
+  #     --onnx-min-ratio 0.01 --sam-min-ratio 0.01 --mosaic-block 16
+  #     --no-blackout
+  #     --apply
+  # # 之后接 merge_boxes（改 --json-dir datasets/3_annotated）与 mosaic-existing（--source datasets/3_annotated）
+

@@ -53,6 +53,7 @@ cjet-vision-pipeline/
 │   │   ├── default.yaml           #   系统默认（paths / parameters / log_file）
 │   │   ├── workflow.yaml          #   系统主工作流 stage 定义
 │   │   ├── inherit_yolo.yaml      #   任务专项：接续 + 重命名 + 转 YOLO（走 stages_only）
+│   │   ├── hand_face_mosaic.yaml  #   任务专项：备份 datasets/1|2|3 + 脸(ONNX)/手(SAM) 标注打码（走 stages_only）
 │   │   ├── all_modules.yaml.example # 全部模块「用法总表」：每个 tools 脚本一个 stage，带 enabled/order
 │   │   ├── detectors.yaml.example #   多检测器组合标注模板（--detectors-config 引用，见 §4.10）
 │   │   └── workflow_config.yaml.example   #   项目级覆盖示例（复制为 src/workflow_config.yaml）
@@ -456,7 +457,74 @@ python -m src.run
 python -m tools.workflow --config src\recover_yolo0708.yaml --from-stage inherit_yolo0708
 ```
 
-### 5.4 测试
+### 5.4 专项工作流：备份 datasets\1|2|3 + 脸(ONNX)/手·手机·香烟(SAM) 标注打码
+
+> 已固化为正式 cfg：`tools/cfg/hand_face_mosaic.yaml`（走 `stages_only`，只跑 4 个
+> stage，不会触发主工作流的其它 20 个）。直接用 `tools/workflow.py` 编排即可：
+>
+> ```bash
+> # 预览（snapshot / auto 各自 dry-run，不写盘）
+> python tools/workflow.py --config tools/cfg/hand_face_mosaic.yaml --dry-run
+>
+> # 真跑：先确认 --dry-run 无误，再给 cfg 里各 stage 的 command 末尾加 --apply
+> python tools/workflow.py --config tools/cfg/hand_face_mosaic.yaml
+> ```
+>
+> 需求：先备份 `datasets\1`、`datasets\2`、`datasets\3`，再用
+> `yolov5s-lmk.onnx` 标「脸(face)」、SAM 文本 prompt 标「手(hand)」，
+> 输出 LabelMe；面积 < 图片 1% 的小框先打马赛克再删除，**但与大框重叠的
+> 部分不打码**（重叠保护由 `ops.apply_blackout` 保证）。
+>
+> 用现有脚本即可拼出，无需新写 Python；遵循 §4.9，如需 workflow 编排，
+> 临时 cfg 放 `src/`（不入 git）。以下命令都在项目根目录执行。
+
+**第 1 步：备份 `datasets\1,2,3`**（默认 dry-run，确认后加 `--apply`）：
+
+```bash
+# 预览
+.conda\python.exe tools\backup\snapshot.py ^
+    --sources datasets\1,datasets\2,datasets\3 ^
+    --output-dir C:\Users\EDY\Pictures
+
+# 真打包（三个目录各生成一个带时间戳的 .tar.gz）
+.conda\python.exe tools\backup\snapshot.py ^
+    --sources datasets\1,datasets\2,datasets\3 ^
+    --output-dir C:\Users\EDY\Pictures ^
+    --apply
+```
+
+**第 2 步：ONNX 标脸 + SAM 标手，小框打码删除（重叠保护）**。
+`auto.py --source` 只吃单个目录，`datasets\1|2|3` 各跑一次（默认预览，
+去掉 `--apply` 先 dry-run，确认无误再加 `--apply`）：
+
+```bash
+# datasets\1（datasets\2、datasets\3 把 --source / --output 换成对应目录即可）
+# SAM 用逗号分隔同时标 hand / phone / cigarette
+.conda\python.exe tools\annotate\auto.py --model-type onnx ^
+    --source datasets\1 ^
+    --output datasets\1_annotated ^
+    --onnx-model weight\yolov5s-lmk.onnx --onnx-label face ^
+    --sam-model weight\sam3.1_multiplex.pt --sam-prompt hand,phone,cigarette --sam-label hand,phone,cigarette ^
+    --onnx-min-ratio 0.01 --sam-min-ratio 0.01 --mosaic-block 16 --apply
+
+.conda\python.exe tools\annotate\auto.py --model-type onnx ^
+    --source datasets\2 --output datasets\2_annotated ^
+    --onnx-model weight\yolov5s-lmk.onnx --onnx-label face ^
+    --sam-model weight\sam3.1_multiplex.pt --sam-prompt hand,phone,cigarette --sam-label hand,phone,cigarette ^
+    --onnx-min-ratio 0.01 --sam-min-ratio 0.01 --mosaic-block 16 --apply
+
+.conda\python.exe tools\annotate\auto.py --model-type onnx ^
+    --source datasets\3 --output datasets\3_annotated ^
+    --onnx-model weight\yolov5s-lmk.onnx --onnx-label face ^
+    --sam-model weight\sam3.1_multiplex.pt --sam-prompt hand,phone,cigarette --sam-label hand,phone,cigarette ^
+    --onnx-min-ratio 0.01 --sam-min-ratio 0.01 --mosaic-block 16 --apply
+```
+
+参数含义：`--onnx-min-ratio` / `--sam-min-ratio 0.01` 即「面积 < 1% 判为小框」的
+阈值；`--mosaic-block 16` 是马赛克块大小。「小框打码后删除、重叠大框部分不打码」
+是该链路的内置行为（见 §4.10）。
+
+### 5.5 测试
 
 > 测试统一收在 `tests/` 下：`tests/` 根目录放独立测试（如 `test_torch_cuda.py` 校验
 > torch/CUDA、`test_onnx_execution_provider.py` 校验 onnxruntime 能否在 CPU/GPU 上

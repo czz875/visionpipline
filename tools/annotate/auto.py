@@ -87,6 +87,7 @@ from tools.core import (  # noqa: E402
     find_json_for_image,
     list_images,
     load_labelme,
+    rect_to_xyxy,
     save_labelme,
 )
 
@@ -522,6 +523,76 @@ def _iter_annotated_images(
         yield image_path, sources, boxes, labels, n
 
 
+def _run_mosaic_existing(args: argparse.Namespace) -> int:
+    """对 ``--source`` 目录下已有 LabelMe 标注的小框打码并删除（原地写回）。
+
+    用于「检测（``--no-blackout``）→ 合并（``merge.py``）→ 打码（本步）」
+    流程的最后一步：读取每张图的 JSON，按面积占比把小框打成马赛克（或纯黑）
+    并从标注中删除，大框保留（共同构成重叠保护区）；默认预览，加 ``--apply`` 才写盘。
+    """
+    source = Path(args.source) if args.source else None
+    if source is None or not source.is_dir():
+        print("[错误] 请通过 --source 指定已标注目录（图片 + JSON 同目录）。", file=sys.stderr)
+        return 1
+    images = list_images(source, recursive=args.recursive)
+    if not images:
+        print(f"[错误] 文件夹内没有图片：{source}", file=sys.stderr)
+        return 1
+    print(f"[信息] 共发现 {len(images)} 张图片")
+
+    use_mosaic = not args.blackout
+    min_ratio = args.mosaic_min_ratio if args.mosaic_min_ratio is not None else args.onnx_min_ratio
+
+    total_kept = total_removed = total_mosaic = 0
+    for image_path in tqdm(images, desc="打码中", unit="img"):
+        image = cv2.imread(str(image_path))
+        if image is None:
+            raise ValueError(f"无法读取图片：{image_path}")
+        json_path = find_json_for_image(image_path)
+        if not json_path or not json_path.exists():
+            continue
+        data = load_labelme(json_path)
+        # 按标签分组收集矩形框
+        by_label: dict[str, list] = {}
+        for shape in data.get("shapes", []):
+            if shape.get("shape_type") != "rectangle":
+                continue
+            pts = shape.get("points", [])
+            if len(pts) < 2:
+                continue
+            by_label.setdefault(shape["label"], []).append(rect_to_xyxy(pts))
+        sources = [
+            _build_source(np.array(boxes, dtype=np.float32), label, min_ratio, image.shape)
+            for label, boxes in by_label.items()
+        ]
+        image, boxes, labels, n = _run_multi_source_annotation(
+            image,
+            sources,
+            use_mosaic=use_mosaic,
+            mosaic_block=args.mosaic_block,
+            dry_run=args.dry_run,
+        )
+        total_kept += len(boxes)
+        total_removed += sum(len(s.removed) for s in sources)
+        total_mosaic += n
+        if not args.dry_run:
+            data = rewrite_labelme_dict(json_path, boxes, labels, image.shape, image_path.name)
+            cv2.imwrite(str(image_path), image)
+            save_labelme(data, json_path)
+
+    mode = "预览" if args.dry_run else "完成"
+    print(f"[{mode}] 图片数：{len(images)}")
+    print(f"[{mode}] 保留框：{total_kept}")
+    print(f"[{mode}] 小框(已删)：{total_removed}")
+    print(
+        f"[{mode}] 实际打码区域：{total_mosaic}"
+        f"（重叠被保护跳过：{total_removed - total_mosaic}）"
+    )
+    if args.dry_run:
+        print("[提示] 当前为预览模式，未写盘；确认无误请加 --apply。")
+    return 0
+
+
 def run_onnx(args: argparse.Namespace) -> int:
     """执行 ONNX 打标 / 覆盖（``--model-type onnx``）。
 
@@ -530,6 +601,10 @@ def run_onnx(args: argparse.Namespace) -> int:
     """
     source = Path(args.source) if args.source else None
     output = Path(args.output) if args.output else None
+
+    # ---- 对已有标注打码（「检测→合并→打码」最后一步，无需加载检测器）----
+    if args.mosaic_existing:
+        return _run_mosaic_existing(args)
 
     onnx_detector = OnnxDetector(
         args.onnx_model,
@@ -541,11 +616,14 @@ def run_onnx(args: argparse.Namespace) -> int:
     )
     sam_detector = None
     if getattr(args, "sam_model", None):
+        # SAM 支持多个文本 prompt（逗号分隔），每个 prompt 对应一个类别名
+        sam_prompts = [s.strip() for s in args.sam_prompt.split(",") if s.strip()]
+        sam_labels = [s.strip() for s in args.sam_label.split(",") if s.strip()]
         sam_detector = SAMTextDetector(
             model_path=args.sam_model,
-            label=args.sam_label,
+            label=sam_labels,
             conf=args.sam_conf,
-            prompt=args.sam_prompt,
+            prompt=sam_prompts,
             device=args.device or None,
         )
 
@@ -616,15 +694,19 @@ def run_onnx(args: argparse.Namespace) -> int:
     if not args.dry_run and output is not None:
         output.mkdir(parents=True, exist_ok=True)
 
+    # --no-blackout：比例阈值视为 0，保留全部框（小框不打码、不删除），供后续合并。
+    eff_onnx_ratio = 0.0 if args.no_blackout else args.onnx_min_ratio
+    eff_sam_ratio = 0.0 if args.no_blackout else args.sam_min_ratio
+
     def _onnx_build_sources(image: np.ndarray, image_path: Path) -> list[_BoxSource]:
         """ONNX 一路（可选 SAM 第二路）归一成 _BoxSource 列表。"""
         onnx_boxes, _ = onnx_detector.predict(image)
         srcs = [
-            _build_source(onnx_boxes, args.onnx_label, args.onnx_min_ratio, image.shape)
+            _build_source(onnx_boxes, args.onnx_label, eff_onnx_ratio, image.shape)
         ]
         if sam_detector is not None:
-            sam_boxes, _ = sam_detector.predict(image_path)
-            srcs.append(_build_source(sam_boxes, args.sam_label, args.sam_min_ratio, image.shape))
+            sam_boxes, sam_labels = sam_detector.predict(image_path)
+            srcs.append(_build_source(sam_boxes, sam_labels, eff_sam_ratio, image.shape))
         return srcs
 
     total_onnx = total_sam = total_removed = total_mosaic = 0
@@ -1032,6 +1114,20 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--blackout", dest="blackout", action="store_true", default=False,
         help="小框用纯黑打码（覆盖模式默认纯黑，标注模式需显式开启）。",
+    )
+    parser.add_argument(
+        "--no-blackout", dest="no_blackout", action="store_true", default=False,
+        help="只检测、不对小框打码：比例阈值视为 0，保留全部框供后续合并；"
+             "配合 --apply 写出未打码的图片与完整标注。用于「检测→合并→打码」第一步。",
+    )
+    parser.add_argument(
+        "--mosaic-existing", dest="mosaic_existing", action="store_true", default=False,
+        help="对已有 LabelMe 标注的小框打码并删除（--source 指向已标注目录，原地写回）；"
+             "配合「--no-blackout 检测 → merge.py 合并」即「检测→合并→打码」最后一步。",
+    )
+    parser.add_argument(
+        "--mosaic-min-ratio", type=float, default=None,
+        help="--mosaic-existing 的小框面积占比阈值；默认与 --onnx-min-ratio 相同。",
     )
     parser.add_argument(
         "--mosaic-block", type=int, default=DEFAULT_MOSAIC_BLOCK,

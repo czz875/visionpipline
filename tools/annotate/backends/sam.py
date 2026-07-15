@@ -20,46 +20,63 @@ import numpy as np
 from tools.annotate.backends.base import AutoLabeler, DetectionsLike
 
 
-def extract_sam_boxes(results) -> np.ndarray:
-    """从 SAM3 结果中提取矩形框（原图像素坐标系）。"""
-    if not results:
-        return np.empty((0, 4), dtype=np.float32)
+def extract_sam_boxes(results) -> tuple[np.ndarray, np.ndarray]:
+    """从 SAM3 结果中提取矩形框（原图像素坐标系）与类别索引（= 文本提示索引）。
 
-    collected: list[np.ndarray] = []
+    返回的 ``boxes`` 形状 ``(N, 4)``、``cls`` 形状 ``(N,)``，二者逐框对齐，
+    ``cls`` 用于把每个框映射到 ``label`` 列表里的具体类别名。
+    """
+    if not results:
+        return np.empty((0, 4), dtype=np.float32), np.empty((0,), dtype=np.int64)
+
+    box_list: list[np.ndarray] = []
+    cls_list: list[np.ndarray] = []
     for result in results:
         boxes = getattr(result, "boxes", None)
-        xyxy = getattr(boxes, "xyxy", None)
-        if xyxy is None:
+        if boxes is None or len(boxes) == 0:
             continue
-        # SAM 跑在 GPU 时 xyxy 是 CUDA tensor，需先 .cpu() 搬到主机再转 numpy
+        xyxy = boxes.xyxy
+        # SAM 跑在 GPU 时 xyxy / cls 是 CUDA tensor，需先 .cpu() 搬到主机再转 numpy
         if hasattr(xyxy, "cpu"):
             xyxy = xyxy.cpu().numpy()
-        array = np.asarray(xyxy, dtype=np.float32)
-        if array.size == 0:
+        array = np.asarray(xyxy, dtype=np.float32).reshape(-1, 4)
+        cls = boxes.cls
+        if hasattr(cls, "cpu"):
+            cls = cls.cpu().numpy()
+        cls = np.asarray(cls, dtype=np.int64).reshape(-1)
+        if array.shape[0] == 0:
             continue
-        collected.append(array.reshape(-1, 4))
+        box_list.append(array)
+        cls_list.append(cls)
 
-    if not collected:
-        return np.empty((0, 4), dtype=np.float32)
-    return np.concatenate(collected, axis=0).astype(np.float32)
+    if not box_list:
+        return np.empty((0, 4), dtype=np.float32), np.empty((0,), dtype=np.int64)
+    return (
+        np.concatenate(box_list, axis=0).astype(np.float32),
+        np.concatenate(cls_list, axis=0).astype(np.int64),
+    )
 
 
 class SAMTextDetector:
-    """基于本地 SAM3 模型的文本 prompt 检测器（返回 numpy 框，不绑定具体类别）。"""
+    """基于本地 SAM3 模型的文本 prompt 检测器（返回 numpy 框 + 逐框类别名）。
+
+    支持同时传入多个文本 prompt（单值或列表），一次 ``set_image`` 后按 prompt 列表
+    一次性推理，返回的标签按 ``boxes.cls``（提示索引）映射到 ``label`` 列表。
+    """
 
     def __init__(
         self,
         model_path: Path,
-        label: str,
+        label: str | list[str],
         conf: float,
-        prompt: str,
+        prompt: str | list[str],
         device: str | None = None,
         predictor_cls=None,
     ) -> None:
         self.model_path = model_path
-        self.label = label
-        self.conf = conf
-        self.prompt = prompt
+        # 单值或列表统一成列表，逐框按 cls 索引取对应类别名
+        self.labels = [label] if isinstance(label, str) else list(label)
+        self.prompts = [prompt] if isinstance(prompt, str) else list(prompt)
         overrides = {
             "conf": conf,
             "task": "segment",
@@ -82,11 +99,17 @@ class SAMTextDetector:
         self.predictor = predictor_cls(overrides=overrides)
 
     def predict(self, image_path: Path) -> tuple[np.ndarray, list[str]]:
-        """按文本 prompt 执行 SAM3 分割，并返回外接矩形框。"""
+        """按文本 prompt 执行 SAM3 分割，返回外接矩形框与逐框类别名。
+
+        多 prompt 时一次 ``set_image`` 后 ``text=self.prompts`` 调用，按返回的
+        ``boxes.cls`` 索引到 ``self.labels`` 得到每个框的具体类别名。
+        """
         self.predictor.set_image(image_path)
-        results = self.predictor(text=[self.prompt])
-        boxes = extract_sam_boxes(results)
-        labels = [self.label] * len(boxes)
+        results = self.predictor(text=self.prompts)
+        boxes, cls = extract_sam_boxes(results)
+        keep = (cls >= 0) & (cls < len(self.labels))
+        boxes, cls = boxes[keep], cls[keep]
+        labels = [self.labels[c] for c in cls]
         return boxes, labels
 
 
