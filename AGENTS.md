@@ -26,7 +26,7 @@
 | 配置示例 | `tools\cfg\workflow_config.yaml.example`（复制为 `src\workflow_config.yaml`） |
 | 主要数据目录 | `datasets/`（raw / annotated / split_30 / split_70 / yolo 等） |
 | 训练产物 | `runs/train/`、`archive/` |
-| 公司专用加密工具 | `encrypt_images.py` / `decrypt_image_folder.py` / `image_crypto.py` 通过 `feat/company-encrypt` 分支的 worktree（`.worktrees/company-encrypt`）单独管理，不进主仓库 `main` |
+| 公司专用加密工具 | 统一放在 `feat/company-encrypt` 分支的 `tools/encrypt/` 模块（`image_crypto.py` 底层库 / `encrypt.py` 加密 / `decrypt.py` 解密），经该分支 worktree（`.worktrees/company-encrypt`）单独管理，不进主仓库 `main` |
 
 ---
 
@@ -589,13 +589,13 @@ python -m tools.workflow --config src\recover_yolo0708.yaml --from-stage inherit
 - **`.worktrees` 工作流（git worktree）**：用于在独立工作目录并行开发，不干扰
   `main`。`.worktrees/` 已被 `.gitignore` 忽略（第 50 行），worktree 目录
   不进历史。
-  - 公司专用加密工具（`encrypt_images.py` / `decrypt_image_folder.py` /
-    `image_crypto.py`）已从 `main` 工作区抽离，单独放在 `feat/company-encrypt`
-    分支（worktree 在 `.worktrees/company-encrypt/`）并提交。
+  - 公司专用加密工具已从 `main` 抽离，重构成 `feat/company-encrypt` 分支的
+    `tools/encrypt/` 模块（`image_crypto.py` 底层库 / `encrypt.py` 加密 /
+    `decrypt.py` 解密），worktree 在 `.worktrees/company-encrypt/` 并提交。
   - 进入工作区：`cd .worktrees/company-encrypt`；创建新 worktree：
     `git worktree add -b <分支名> .worktrees/<目录名> main`。
-  - `main` 工作区根目录可能仍残留这些文件的未跟踪副本，改动前先 `git status`
-    确认归属，避免误改 / 误提交。
+  - 该分支 `tools/cfg/encrypt.yaml` 是加密/解密专项工作流
+    （`stages_only` 只跑两阶段）；`main` 工作区本身不含这些文件。
 
 ---
 
