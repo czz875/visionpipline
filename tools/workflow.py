@@ -218,6 +218,8 @@ def run(
     dry_run: bool = False,
     from_stage: str = "",
     to_stage: str = "",
+    config: dict | None = None,
+    overrides: dict[str, str] | None = None,
 ) -> int:
     """跑工作流（Python API 版，不依赖 sys.argv）。
 
@@ -226,23 +228,33 @@ def run(
             [--from-stage X] [--to-stage Y]
 
     ``cfg`` 为 None 时走 ``tools/cfg/workflow_config.yaml`` 默认入口。
-    """
-    config_path = Path(cfg) if cfg is not None else PROJECT_CFG_PATH
-    if not config_path.exists():
-        print(f"[错误] 配置文件不存在：{config_path}")
-        return 1
 
-    # 走 tools.cfg.resolve_config：自动叠加 default + workflow + 用户配置
-    config = resolve_config(config_path)
-    mapping = flatten_dict(config)
+    ``config`` 为已解析好的 dict 时直接用它（跳过文件加载），便于在 Python 里
+    动态改写 stages / paths / parameters 后再跑——这就是「参数覆盖 yaml」的入口。
+    ``overrides`` 为 ``${prefix.key}`` → 新值的映射，会覆盖 yaml 同名变量，
+    等价于不改文件、只在 Python 里临时改某个参数（见 ``src/main.py`` 示例）。
+    """
+    if config is not None:
+        resolved = config
+    else:
+        config_path = Path(cfg) if cfg is not None else PROJECT_CFG_PATH
+        if not config_path.exists():
+            print(f"[错误] 配置文件不存在：{config_path}")
+            return 1
+        resolved = resolve_config(config_path)
+
+    mapping = flatten_dict(resolved)
     mapping["date"] = datetime.now().strftime("%Y%m%d")
     mapping["datetime"] = datetime.now().strftime("%Y%m%d_%H%M%S")
     mapping["project_root"] = str(PROJECT_ROOT)
+    if overrides:
+        # 变量层覆盖：覆盖 yaml 里的 ${prefix.key}，实现 Python 内改参。
+        mapping.update({str(k): str(v) for k, v in overrides.items()})
 
-    log_path = Path(config.get("log_file", str(DEFAULT_LOG_FILE)))
+    log_path = Path(resolved.get("log_file", str(DEFAULT_LOG_FILE)))
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    stages = config.get("stages", [])
+    stages = resolved.get("stages", [])
     if not stages:
         print("[警告] 配置文件中没有定义 stages。")
         return 0
