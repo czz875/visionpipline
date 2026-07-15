@@ -14,6 +14,8 @@ tools/merge/inherit_dataset.py
 - ``--start-batches "0001,0002,0003,0004"``：把前 N*batch_size 张写到指定 batch 编号
   （适合"补回缺失的早期 batch"），剩余从
   ``max(start_batches 数字, target 现有最大)+1`` 接续。不指定时按 max+1 接续。
+- ``--recursive``：递归扫描 ``source`` 子目录下的 PNG（默认只扫 source 顶层）。
+  适合 ``source`` 是含 ``1_annotated/2_annotated/...`` 子目录的父目录（此时顶层无 PNG）。
 
 归类规则（与 behavior/0022 现有分布对齐）：
 
@@ -49,6 +51,14 @@ tools/merge/inherit_dataset.py
         --start-batches 0001,0002,0003,0004 ^
         --dedup ^
         --apply
+
+    # source 含子目录（1_annotated/2_annotated/3_annotated），递归扫描平铺 PNG+JSON
+    .conda\\python.exe tools\\merge\\inherit_dataset.py ^
+        --source datasets\\0042 ^
+        --target datasets\\behavior ^
+        --batch-size 1000 ^
+        --recursive ^
+        --apply
 """
 
 from __future__ import annotations
@@ -80,6 +90,7 @@ DEFAULT_MOVE = False
 DEFAULT_DEDUP = False  # 通用参数：按 target 下 PNG/JPG basename 去重
 DEFAULT_START_BATCHES: tuple[str, ...] = ()  # 通用参数：指定起始 batch 列表
 DEFAULT_DEDUP_EXTS: tuple[str, ...] = (".png", ".jpg", ".jpeg")
+DEFAULT_RECURSIVE = False  # 通用参数：递归扫描 source 子目录下的 PNG
 
 # behavior 现有 8 个分类子目录（顺序无业务含义，仅用于建目录时排序）
 CATEGORY_DIRS: tuple[str, ...] = (
@@ -125,9 +136,16 @@ def discover_max_batch(target_dir: Path) -> int:
     return max_idx
 
 
-def collect_pairs(source_dir: Path) -> list[Pair]:
-    """扫描 ``source_dir`` 下所有 PNG+JSON 配对（按文件名排序）。"""
-    pngs = sorted(source_dir.glob("*.png"))
+def collect_pairs(source_dir: Path, recursive: bool = DEFAULT_RECURSIVE) -> list[Pair]:
+    """扫描 ``source_dir`` 下的 PNG+JSON 配对（按文件名排序）。
+
+    默认只扫顶层 ``*.png``（非递归）；``recursive=True`` 时递归 ``rglob`` 所有
+    子目录的 PNG（适合 source 是含 ``1_annotated/2_annotated/...`` 子目录的父目录）。
+    """
+    if recursive:
+        pngs = sorted(source_dir.rglob("*.png"))
+    else:
+        pngs = sorted(source_dir.glob("*.png"))
     pairs: list[Pair] = []
     for png in pngs:
         json_path = png.with_suffix(".json")
@@ -241,6 +259,7 @@ def inherit_dataset(
     move: bool = DEFAULT_MOVE,
     dedup: bool = DEFAULT_DEDUP,
     start_batches: tuple[str, ...] = DEFAULT_START_BATCHES,
+    recursive: bool = DEFAULT_RECURSIVE,
 ) -> list[dict]:
     """执行接续，返回每个新 batch 的计划报告。
 
@@ -249,6 +268,7 @@ def inherit_dataset(
     - ``start_batches=(b1, b2, ...)`` 时前 N*batch_size 张写到指定 batch（4 位数字），
       剩余从 ``max(start_batches 数字, target_dir 现有最大 batch) + 1`` 接续。
       不指定则按现有 max+1 接续（默认行为，向后兼容）。
+    - ``recursive=True`` 时递归扫描 ``source_dir`` 子目录下的 PNG（默认只扫顶层）。
     """
     source_dir = source_dir.resolve()
     target_dir = target_dir.resolve()
@@ -258,9 +278,10 @@ def inherit_dataset(
     if not target_dir.is_dir():
         raise FileNotFoundError(f"目标目录不存在：{target_dir}")
 
-    pairs = collect_pairs(source_dir)
+    pairs = collect_pairs(source_dir, recursive=recursive)
     if not pairs:
-        print(f"[警告] 源目录 {source_dir} 下没有 PNG 文件。")
+        scope = "（含子目录，递归）" if recursive else "（仅顶层）"
+        print(f"[警告] 源目录 {source_dir} {scope}下没有 PNG 文件。")
         return []
 
     # 通用：去重
@@ -397,7 +418,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_false",
         help="真正执行（默认是 dry-run 预览）。",
     )
-    parser.set_defaults(dry_run=DEFAULT_DRY_RUN)
+    parser.add_argument(
+        "--recursive",
+        action="store_true",
+        help="递归扫描 source 子目录下的 PNG（默认只扫 source 顶层）。适合 source 是含 1_annotated/2_annotated/... 子目录的父目录。",
+    )
+    parser.set_defaults(dry_run=DEFAULT_DRY_RUN, recursive=DEFAULT_RECURSIVE)
     return parser
 
 
@@ -422,6 +448,7 @@ def main() -> int:
             move=args.move,
             dedup=args.dedup,
             start_batches=start_batches,
+            recursive=args.recursive,
         )
     except (FileNotFoundError, NotADirectoryError) as e:
         print(f"[错误] {e}")
