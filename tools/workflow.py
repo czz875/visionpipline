@@ -220,6 +220,8 @@ def run(
     to_stage: str = "",
     config: dict | None = None,
     overrides: dict[str, str] | None = None,
+    input_dir: str | None = None,
+    output_dir: str | None = None,
 ) -> int:
     """跑工作流（Python API 版，不依赖 sys.argv）。
 
@@ -233,6 +235,9 @@ def run(
     动态改写 stages / paths / parameters 后再跑——这就是「参数覆盖 yaml」的入口。
     ``overrides`` 为 ``${prefix.key}`` → 新值的映射，会覆盖 yaml 同名变量，
     等价于不改文件、只在 Python 里临时改某个参数（见 ``src/main.py`` 示例）。
+
+    ``input_dir`` / ``output_dir`` 是 ``paths.input_dir`` / ``paths.output_dir``
+    的便捷写法，传了就等价于在 ``overrides`` 里写这两个键。
     """
     if config is not None:
         resolved = config
@@ -250,6 +255,11 @@ def run(
     if overrides:
         # 变量层覆盖：覆盖 yaml 里的 ${prefix.key}，实现 Python 内改参。
         mapping.update({str(k): str(v) for k, v in overrides.items()})
+
+    if input_dir is not None:
+        mapping["paths.input_dir"] = str(input_dir)
+    if output_dir is not None:
+        mapping["paths.output_dir"] = str(output_dir)
 
     log_path = Path(resolved.get("log_file", str(DEFAULT_LOG_FILE)))
     log_path.parent.mkdir(parents=True, exist_ok=True)
