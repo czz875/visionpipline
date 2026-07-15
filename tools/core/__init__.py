@@ -20,6 +20,7 @@ from tools.core.geometry import (
     rect_to_xyxy,
     xyxy_to_points,
 )
+from tools.core.copy_dataset import copy_dataset
 from tools.core.images import list_images
 from tools.core.labelme import (
     detections_to_labelme_dict,
@@ -40,6 +41,7 @@ __all__ = [
     "find_json_for_image",
     "get_boxes_dist",
     "labelme_dict_to_detections",
+    "copy_dataset",
     "list_images",
     "list_labelme_files",
     "load_labelme",

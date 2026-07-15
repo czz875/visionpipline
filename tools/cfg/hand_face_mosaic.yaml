@@ -56,7 +56,7 @@ stages:
     order: 2
     command: >
       python tools/annotate/auto.py --model-type onnx
-      --source datasets/phone2 --output datasets/phone2_annotated
+      --source E:\czz\0715_03 --output E:\czz\0715_03_annotated
       --onnx-model weight/yolov5s-lmk.onnx --onnx-label face
       --sam-model weight/sam3.1_multiplex.pt --sam-prompt hand,phone,cigarette --sam-label hand,phone,cigarette
       --onnx-min-ratio 0.01 --sam-min-ratio 0.01 --mosaic-block 16

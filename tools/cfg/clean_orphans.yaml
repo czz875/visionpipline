@@ -1,0 +1,48 @@
+# tools/cfg/clean_orphans.yaml
+# 清理孤儿文件：有图片没 JSON 删图片、有 JSON 没图片删 JSON（原地删除）。
+# 自包含配置：参数全部写在下面，不依赖 workflow.yaml 的 stage 定义。
+# stage 命名为独有名字（copy_input / clean_orphan_json / remove_orphan_image），
+# 避免与 workflow.yaml 同名 stage 冲突，配合 stages_only 只跑这三个。
+#
+# 行为：先把 paths.input_dir 完整复制到 paths.output_dir，再在 output_dir 内
+# 原地清理孤儿文件。input_dir 与 output_dir 可相同（相同则跳过复制、直接原地清理），
+# 也可不同（不同则先复制、输入目录不动，安全）。
+#
+# 运行：
+#   python tools/workflow.py --config tools/cfg/clean_orphans.yaml --dry-run
+#   python tools/workflow.py --config tools/cfg/clean_orphans.yaml
+# 或用 Python 入口：python src\clean_orphans.py
+
+paths:
+  input_dir: C:\Users\EDY\Desktop\1_annotated          # 输入目录（源）
+  output_dir: C:\Users\EDY\Desktop\1_annotated # 输出目录（与输入相同=原地清理；不同=先复制再清理）
+
+parameters:
+  clean_recursive_flag: "--recursive"       # 递归子目录；不递归则改为 ""
+
+stages_only:
+  - copy_input
+  - clean_orphan_json
+  - remove_orphan_image
+
+stages:
+  - name: copy_input                        # 调用 tools/clean/copy_dataset.py：相等则跳过、不同则复制
+    order: 10
+    command: >
+      python tools/core/copy_dataset.py
+      --input "${paths.input_dir}"
+      --output "${paths.output_dir}"
+
+  - name: clean_orphan_json                 # 有 JSON 没图片 → 删 JSON
+    order: 20
+    command: >
+      python tools/clean/orphan_json.py
+      --dataset-path "${paths.output_dir}"
+      ${parameters.clean_recursive_flag}
+
+  - name: remove_orphan_image               # 有图片没 JSON → 删图片
+    order: 30
+    command: >
+      python tools/clean/orphan_images.py
+      --dataset-path "${paths.output_dir}"
+      ${parameters.clean_recursive_flag}
