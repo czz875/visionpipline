@@ -16,10 +16,12 @@ tools/merge/inherit_dataset.py
   ``max(start_batches 数字, target 现有最大)+1`` 接续。不指定时按 max+1 接续。
 - ``--recursive``：递归扫描 ``source`` 子目录下的 PNG（默认只扫 source 顶层）。
   适合 ``source`` 是含 ``1_annotated/2_annotated/...`` 子目录的父目录（此时顶层无 PNG）。
+- ``--no-classify``：不按 JSON label 分类，直接平铺进 batch 目录，替代
+  ``tools/split/into_groups.py`` 的纯按数量分组用途（仅分组、不分类）。
 
 归类规则（与 behavior/0022 现有分布对齐）：
 
-    仅 face            -> only_head
+    仅 face            -> only_face
     仅 hand            -> only_hand
     仅 cigarette       -> has_cigarette
     含 phone           -> has_phone
@@ -91,6 +93,7 @@ DEFAULT_DEDUP = False  # 通用参数：按 target 下 PNG/JPG basename 去重
 DEFAULT_START_BATCHES: tuple[str, ...] = ()  # 通用参数：指定起始 batch 列表
 DEFAULT_DEDUP_EXTS: tuple[str, ...] = (".png", ".jpg", ".jpeg")
 DEFAULT_RECURSIVE = False  # 通用参数：递归扫描 source 子目录下的 PNG
+DEFAULT_NO_CLASSIFY = False  # 通用参数：不按 label 分类，直接平铺进 batch 目录
 
 # behavior 现有 8 个分类子目录（顺序无业务含义，仅用于建目录时排序）
 CATEGORY_DIRS: tuple[str, ...] = (
@@ -190,7 +193,7 @@ def classify(labels: list[str]) -> str:
     if label_set == {"cigarette"}:
         return "has_cigarette"
     if label_set == {"face"}:
-        return "only_head"
+        return "only_face"
     if label_set == {"hand"}:
         return "only_hand"
     if counts.get("face", 0) >= 2:
@@ -260,6 +263,7 @@ def inherit_dataset(
     dedup: bool = DEFAULT_DEDUP,
     start_batches: tuple[str, ...] = DEFAULT_START_BATCHES,
     recursive: bool = DEFAULT_RECURSIVE,
+    no_classify: bool = DEFAULT_NO_CLASSIFY,
 ) -> list[dict]:
     """执行接续，返回每个新 batch 的计划报告。
 
@@ -269,6 +273,8 @@ def inherit_dataset(
       剩余从 ``max(start_batches 数字, target_dir 现有最大 batch) + 1`` 接续。
       不指定则按现有 max+1 接续（默认行为，向后兼容）。
     - ``recursive=True`` 时递归扫描 ``source_dir`` 子目录下的 PNG（默认只扫顶层）。
+    - ``no_classify=True`` 时不按 JSON label 分类，把图直接平铺进 batch 目录
+      （替代 ``tools/split/into_groups.py`` 的纯按数量分组用途）。
     """
     source_dir = source_dir.resolve()
     target_dir = target_dir.resolve()
@@ -320,9 +326,14 @@ def inherit_dataset(
         plan_items: list[tuple[Pair, Path, Path, str]] = []
         for pair in batch:
             scan_pbar.update(1)
-            labels = read_labels(pair.json)
-            category = classify(labels)
-            dst_dir = batch_dir / category
+            if no_classify:
+                # 不分类：直接平铺进 batch 目录，不读 JSON label
+                category = "(flat)"
+                dst_dir = batch_dir
+            else:
+                labels = read_labels(pair.json)
+                category = classify(labels)
+                dst_dir = batch_dir / category
             dst_image = dst_dir / pair.image.name
             dst_json = dst_dir / pair.json.name
             plan_items.append((pair, dst_image, dst_json, category))
@@ -330,8 +341,9 @@ def inherit_dataset(
 
         if not dry_run:
             batch_dir.mkdir(parents=True, exist_ok=True)
-            for cat in CATEGORY_DIRS:
-                (batch_dir / cat).mkdir(parents=True, exist_ok=True)
+            if not no_classify:
+                for cat in CATEGORY_DIRS:
+                    (batch_dir / cat).mkdir(parents=True, exist_ok=True)
             # 第二段进度：实际复制 / 移动
             op_name = "移动" if move else "复制"
             for pair, dst_image, dst_json, _cat in tqdm(
@@ -403,6 +415,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="按 target 下 PNG/JPG 的 basename 跳过已存在的对（通用去重）。",
     )
     parser.add_argument(
+        "--no-classify",
+        action="store_true",
+        help="不按 JSON label 分类，直接平铺进 batch 目录（替代 into_groups 的纯分组用途）。",
+    )
+    parser.add_argument(
         "--start-batches",
         type=str,
         default="",
@@ -449,6 +466,7 @@ def main() -> int:
             dedup=args.dedup,
             start_batches=start_batches,
             recursive=args.recursive,
+            no_classify=args.no_classify,
         )
     except (FileNotFoundError, NotADirectoryError) as e:
         print(f"[错误] {e}")
