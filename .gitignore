@@ -49,3 +49,4 @@ src/
 docs/
 .worktrees/
 .codebuddy/
+.claude/
