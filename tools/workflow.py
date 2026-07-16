@@ -50,10 +50,18 @@ from tools.cfg import (
 # `python` / `yolo` 命令走 shell PATH 查找。把 .conda 和 .conda\Scripts
 # 显式 prepend 到 os.environ["PATH"]，避免子进程 shell 找不到解释器
 # （同时让 ultralytics 装的 `yolo` CLI 也都能找到）。
-_CONDA_DIR = PROJECT_ROOT / ".conda"
-if _CONDA_DIR.is_dir() and sys.platform == "win32":
+# 从 PROJECT_ROOT 向上逐级查找项目自带的 .conda（worktree 嵌套更深也能命中，
+# 例如 .worktrees/<name> 下往上两级才是主仓库根的 .conda）。
+_conda_dir = None
+for _cur in (PROJECT_ROOT, *PROJECT_ROOT.parents):
+    _cand = _cur / ".conda"
+    if _cand.is_dir():
+        _conda_dir = _cand
+        break
+
+if _conda_dir is not None and sys.platform == "win32":
     for sub in ("", "Scripts"):
-        p = str(_CONDA_DIR / sub) if sub else str(_CONDA_DIR)
+        p = str(_conda_dir / sub) if sub else str(_conda_dir)
         if p not in os.environ.get("PATH", "").split(os.pathsep):
             os.environ["PATH"] = p + os.pathsep + os.environ.get("PATH", "")
 
@@ -220,8 +228,7 @@ def run(
     to_stage: str = "",
     config: dict | None = None,
     overrides: dict[str, str] | None = None,
-    input_dir: str | None = None,
-    output_dir: str | None = None,
+    **kwargs: str,
 ) -> int:
     """跑工作流（Python API 版，不依赖 sys.argv）。
 
@@ -236,8 +243,9 @@ def run(
     ``overrides`` 为 ``${prefix.key}`` → 新值的映射，会覆盖 yaml 同名变量，
     等价于不改文件、只在 Python 里临时改某个参数（见 ``src/main.py`` 示例）。
 
-    ``input_dir`` / ``output_dir`` 是 ``paths.input_dir`` / ``paths.output_dir``
-    的便捷写法，传了就等价于在 ``overrides`` 里写这两个键。
+    任意 ``paths.<key>`` 都可当成命名参数直接传，例如 ``input_dir=...``、
+    ``output_dir=...``、``encrypt_in=...``、``decrypt_out=...``，传了就等价于在
+    ``overrides`` 里写 ``paths.<key>``（见 ``src/clean_orphans.py`` 等示例）。
     """
     if config is not None:
         resolved = config
@@ -256,10 +264,10 @@ def run(
         # 变量层覆盖：覆盖 yaml 里的 ${prefix.key}，实现 Python 内改参。
         mapping.update({str(k): str(v) for k, v in overrides.items()})
 
-    if input_dir is not None:
-        mapping["paths.input_dir"] = str(input_dir)
-    if output_dir is not None:
-        mapping["paths.output_dir"] = str(output_dir)
+    # 命名参数便捷写法：把 input_dir / output_dir / encrypt_in ... 等透传成
+    # paths.<key> 覆盖，等价于在 overrides 里写对应键。
+    for key, val in kwargs.items():
+        mapping[f"paths.{key}"] = str(val)
 
     log_path = Path(resolved.get("log_file", str(DEFAULT_LOG_FILE)))
     log_path.parent.mkdir(parents=True, exist_ok=True)
