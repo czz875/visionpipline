@@ -22,6 +22,7 @@ from tools.core.geometry import (
 )
 from tools.core.copy_dataset import copy_dataset
 from tools.core.images import list_images
+from tools.core.output_dir import build_timestamped_output_dir
 from tools.core.labelme import (
     detections_to_labelme_dict,
     find_image_for_json,
@@ -36,6 +37,7 @@ __all__ = [
     "DEFAULT_DATASET_PATH",
     "IMAGE_EXTENSIONS",
     "LABELME_EXT",
+    "build_timestamped_output_dir",
     "detections_to_labelme_dict",
     "find_image_for_json",
     "find_json_for_image",
