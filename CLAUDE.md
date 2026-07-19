@@ -22,6 +22,7 @@
 - **临时工作流 cfg 放 `src/`**（被 `.gitignore` 忽略，不入 git）
 - **默认参数集中到文件顶部**，每个脚本顶部有 `DEFAULT_*` 常量区
 - **优先调用官方库**：supervision / cleanvision 有现成 API 的不要手写
+- **通用功能先在 `main` 分支开发**，再同步到 `.worktrees/company-encrypt`；worktree 只保留公司专用加密工具相关改动
 
 ## 常用命令速查
 
