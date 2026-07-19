@@ -112,6 +112,24 @@ cjet-vision-pipeline/
 
 ## 4. 开发约定（必读）
 
+### 4.0 分支与工作区约定
+
+本项目使用 `main` 分支承载通用流水线代码，`feat/company-encrypt` 分支通过 git worktree（`.worktrees/company-encrypt`）独立管理公司专用加密工具。
+
+**工作区边界：**
+
+| 工作区 | 用途 | 典型内容 |
+|---|---|---|
+| `main` 工作区 | 通用数据生产 + 模型训练流水线 | `tools/annotate/`、`tools/clean/`、`tools/core/`、`tools/merge/` 等 |
+| `.worktrees/company-encrypt` | 公司专用图片加密/解密工具 | `tools/encrypt/`、`tools/cfg/encrypt.yaml`、`tools/cfg/decrypt.yaml` |
+
+**开发流程：**
+
+1. **通用改动一律先在 `main` 分支开发、提交。**
+2. 需要加密工具适配时，进入 worktree，基于最新 `main` 做 `git rebase main`，再提交加密相关改动。
+3. **不要把通用模块的改动放在 worktree 里再 cherry-pick 回 main**，这会导致两边出现内容相同但 hash 不同的重复提交，历史混乱。
+4. worktree 里只保留该分支专有的内容；若发现通用文件在 worktree 里被改动，应先移回 main 提交，再同步到 worktree。
+
 ### 4.1 语言规范
 
 - **所有对话、解释、建议**：使用简体中文。
