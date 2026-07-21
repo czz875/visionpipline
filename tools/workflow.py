@@ -80,14 +80,15 @@ DEFAULT_LOG_FILE = DEFAULT_LOG                    # workflow.log（在 tools/cfg
 # =============================================================================
 
 _OUTPUT_PATH_RE = re.compile(r"^OUTPUT_PATH:(.+)$", re.MULTILINE)
+_OUTPUT_ARG_RE = re.compile(r"--output(?:-dir|-a|-b)?\s+(\S+)")
 
 
 def _extract_output_path(stdout_text: str, command: str) -> str | None:
-    """从 stdout 或 command 的 --output 参数提取输出路径。"""
+    """从 stdout 或 command 的输出参数提取输出路径。"""
     m = _OUTPUT_PATH_RE.search(stdout_text)
     if m:
         return m.group(1).strip()
-    m = re.search(r"--output\s+(\S+)", command)
+    m = _OUTPUT_ARG_RE.search(command)
     if m:
         return m.group(1)
     return None

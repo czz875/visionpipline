@@ -38,10 +38,20 @@ def ensure_local_supervision_import() -> None:
 
 
 def _resolve_output_dir(args: Any) -> Any:
-    """给 args.output 追加 ``<prefix>_YYYYMMDD_HHMMSS`` 子目录。"""
+    """解析输出目录。
+
+    当 ``args.output`` 显式传入时直接使用该路径（创建父目录）；
+    仅当 ``args.output`` 为 ``None`` 时，才在默认目录下追加
+    ``<prefix>_YYYYMMDD_HHMMSS`` 时间戳子目录。
+    """
     from tools.core import build_timestamped_output_dir
 
-    base_dir = getattr(args, "output", None) or DEFAULT_OUTPUT_DIR
+    explicit_output = getattr(args, "output", None)
+    if explicit_output is not None:
+        path = Path(explicit_output)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+
     if getattr(args, "mosaic_existing", False):
         prefix = "mosaic"
     elif getattr(args, "detectors_config", None):
@@ -50,7 +60,7 @@ def _resolve_output_dir(args: Any) -> Any:
         prefix = str(args.model_type)
     else:
         prefix = "annotate"
-    return build_timestamped_output_dir(base_dir, prefix)
+    return build_timestamped_output_dir(DEFAULT_OUTPUT_DIR, prefix)
 
 
 def main(argv: list[str] | None = None) -> int:

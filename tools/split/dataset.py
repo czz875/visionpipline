@@ -162,6 +162,7 @@ def main() -> int:
 
     print(f"A 份：{count_a} 张 -> {output_a}")
     print(f"B 份：{count_b} 张 -> {output_b}")
+    print(f"OUTPUT_PATH:{output_a.resolve()}")
     print(f"OUTPUT_PATH_A:{output_a.resolve()}")
     print(f"OUTPUT_PATH_B:{output_b.resolve()}")
     return 0
