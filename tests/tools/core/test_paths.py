@@ -1,0 +1,21 @@
+import re
+from pathlib import Path
+
+from tools.core.paths import get_timestamped_output_dir
+
+
+def test_get_timestamped_output_dir_creates_timestamped_subdir(tmp_path):
+    base = tmp_path / "out"
+    result = get_timestamped_output_dir(base, "auto_annotate")
+    assert result.parent == base
+    assert re.match(r"auto_annotate_\d{8}_\d{6}", result.name)
+    assert result.exists()
+
+
+def test_get_timestamped_output_dir_avoids_collision(tmp_path):
+    base = tmp_path / "out"
+    first = get_timestamped_output_dir(base, "auto_annotate")
+    second = get_timestamped_output_dir(base, "auto_annotate")
+    assert second.name.startswith(first.name)
+    assert second != first
+    assert re.search(r"_\d{3}$", second.name)
