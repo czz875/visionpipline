@@ -30,3 +30,16 @@ def test_run_stage_uses_output_param_as_fallback(tmp_path):
     ok = workflow.run_stage(stage, mapping, dry_run=False, log_path=log_path)
     assert ok is True
     assert mapping.get("prev.annotated_dir") == "datasets/01_annotated"
+
+
+def test_run_stage_captures_output_path_in_dry_run(tmp_path):
+    log_path = tmp_path / "workflow.log"
+    stage = {
+        "name": "dry_stage",
+        "command": "python tools/annotate/auto.py --output datasets/01_annotated",
+        "output_var": "annotated_dir",
+    }
+    mapping = {}
+    ok = workflow.run_stage(stage, mapping, dry_run=True, log_path=log_path)
+    assert ok is True
+    assert mapping.get("prev.annotated_dir") == "datasets/01_annotated"

@@ -93,6 +93,28 @@ def _extract_output_path(stdout_text: str, command: str) -> str | None:
     return None
 
 
+def _capture_output_var(
+    stage: dict,
+    stdout_text: str,
+    command: str,
+    mapping: dict[str, str],
+) -> None:
+    """若 stage 声明了 output_var，从 stdout 或 command 的 --output 提取路径并写入 mapping。"""
+    output_var = stage.get("output_var", "")
+    if not output_var:
+        return
+    name = stage.get("name", "unnamed")
+    output_path = _extract_output_path(stdout_text, command)
+    if output_path:
+        mapping[f"prev.{output_var}"] = output_path
+        print(f"    [变量] prev.{output_var} = {output_path}")
+    else:
+        print(
+            f"    [警告] 阶段 {name} 声明了 output_var={output_var}，"
+            f"但未提取到输出路径"
+        )
+
+
 def run_stage(
     stage: dict,
     mapping: dict[str, str],
@@ -102,7 +124,6 @@ def run_stage(
     """执行单个 stage。成功返回 ``True``，失败返回 ``False``。"""
     name = stage.get("name", "unnamed")
     raw_command = stage.get("command", "")
-    output_var = stage.get("output_var", "")
     if not raw_command:
         print(f"[跳过] 阶段 {name} 没有配置 command。")
         return True
@@ -118,16 +139,7 @@ def run_stage(
 
     if dry_run:
         print("    (dry-run，未实际执行)")
-        if output_var:
-            output_path = _extract_output_path("", command)
-            if output_path:
-                mapping[f"prev.{output_var}"] = output_path
-                print(f"    [变量] prev.{output_var} = {output_path}")
-            else:
-                print(
-                    f"    [警告] 阶段 {name} 声明了 output_var={output_var}，"
-                    f"但未提取到输出路径"
-                )
+        _capture_output_var(stage, "", command, mapping)
         return True
 
     result = subprocess.run(
@@ -152,16 +164,7 @@ def run_stage(
 
     print(f"    [完成] 阶段 {name}")
 
-    if output_var:
-        output_path = _extract_output_path(result.stdout, command)
-        if output_path:
-            mapping[f"prev.{output_var}"] = output_path
-            print(f"    [变量] prev.{output_var} = {output_path}")
-        else:
-            print(
-                f"    [警告] 阶段 {name} 声明了 output_var={output_var}，"
-                f"但未提取到输出路径"
-            )
+    _capture_output_var(stage, result.stdout, command, mapping)
 
     return True
 
@@ -250,17 +253,7 @@ def run_group(
             ok = False
         else:
             print(f"    [完成] 阶段 {name}")
-            output_var = s.get("output_var", "")
-            if output_var:
-                output_path = _extract_output_path(stdout, command)
-                if output_path:
-                    mapping[f"prev.{output_var}"] = output_path
-                    print(f"    [变量] prev.{output_var} = {output_path}")
-                else:
-                    print(
-                        f"    [警告] 阶段 {name} 声明了 output_var={output_var}，"
-                        f"但未提取到输出路径"
-                    )
+            _capture_output_var(s, stdout, command, mapping)
     return ok
 
 
@@ -367,7 +360,12 @@ def run(
     )
     groups: list[list[dict]] = []
     for _idx, stage in ordered:
-        if groups and _order_value(groups[-1][-1], 0) == _order_value(stage, 0):
+        if (
+            groups
+            and groups[-1][-1].get("order") is not None
+            and stage.get("order") is not None
+            and int(groups[-1][-1]["order"]) == int(stage["order"])
+        ):
             groups[-1].append(stage)
         else:
             groups.append([stage])
