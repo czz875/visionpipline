@@ -1,0 +1,26 @@
+# tools/cfg/label_replace.yaml
+# LabelMe 标签替换/追加工具（tools/label/replace.py）
+#
+# 用法：
+#   python tools/workflow.py --config tools/cfg/label_replace.yaml --dry-run
+#   python tools/workflow.py --config tools/cfg/label_replace.yaml
+
+paths:
+  input_dir: datasets/01_annotated
+  output_dir: datasets/01_annotated_relabeled
+
+parameters:
+  replace_rules: ""
+  append_rules: ""
+
+stages_only:
+  - label_replace
+
+stages:
+  - name: label_replace
+    command: >
+      python tools/label/replace.py
+      --input ${paths.input_dir}
+      --output ${paths.output_dir}
+      --replace "${parameters.replace_rules}"
+      --append "${parameters.append_rules}"

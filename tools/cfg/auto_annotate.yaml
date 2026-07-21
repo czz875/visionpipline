@@ -1,0 +1,19 @@
+# tools/cfg/auto_annotate.yaml
+# 自动标注脚本的独立 cfg（tools/annotate/auto.py）
+# 支持 YOLO / ONNX / SAM3 / DETR 以及多检测器组合。
+#
+# 用法：
+#   python tools/workflow.py --config tools/cfg/auto_annotate.yaml --dry-run
+#   python tools/workflow.py --config tools/cfg/auto_annotate.yaml
+
+stages_only:
+  - auto_annotate
+
+stages:
+  - name: auto_annotate
+    command: >
+      python tools/annotate/auto.py
+      --model-type yolo
+      --source ${paths.raw_data}
+      --output ${paths.annotated}
+      --format labelme

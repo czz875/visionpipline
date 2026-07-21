@@ -1,0 +1,28 @@
+# tools/cfg/jpg_to_png.yaml
+# JPG 批量转 PNG + 修复 LabelMe JSON（tools/convert/jpg_to_png.py）
+#
+# 用法：
+#   python tools/workflow.py --config tools/cfg/jpg_to_png.yaml --dry-run
+#   python tools/workflow.py --config tools/cfg/jpg_to_png.yaml
+
+paths:
+  raw_jpg: datasets/raw_jpg
+  raw_data: datasets/raw
+
+parameters:
+  jpg_to_png_threads: 16
+  jpg_to_png_compression: 9
+  recursive_flag: "--recursive"
+
+stages_only:
+  - jpg_to_png
+
+stages:
+  - name: jpg_to_png
+    command: >
+      python tools/convert/jpg_to_png.py
+      --input ${paths.raw_jpg}
+      --output ${paths.raw_data}
+      --num-threads ${parameters.jpg_to_png_threads}
+      --png-compression ${parameters.jpg_to_png_compression}
+      ${parameters.recursive_flag}

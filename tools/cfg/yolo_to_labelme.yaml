@@ -1,0 +1,24 @@
+# tools/cfg/yolo_to_labelme.yaml
+# YOLO txt 标注批量转回 LabelMe JSON（tools/convert/yolo_to_labelme.py）
+#
+# 用法：
+#   python tools/workflow.py --config tools/cfg/yolo_to_labelme.yaml --dry-run
+#   python tools/workflow.py --config tools/cfg/yolo_to_labelme.yaml
+
+paths:
+  remaining: datasets/02_remaining_70
+  self_annotated_labels: datasets/04_self_annotated_labels
+  labelme_final: datasets/05_labelme_final
+  yolo: datasets/yolo
+
+stages_only:
+  - convert_back_labelme
+
+stages:
+  - name: convert_back_labelme
+    command: >
+      python tools/convert/yolo_to_labelme.py
+      --images ${paths.remaining}
+      --labels ${paths.self_annotated_labels}
+      --classes ${paths.yolo}/all/data.yaml
+      --output ${paths.labelme_final}

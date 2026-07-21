@@ -1,0 +1,29 @@
+# tools/cfg/archive.yaml
+# 训练产物归档（tools/train/archive.py）
+#
+# 用法：
+#   python tools/workflow.py --config tools/cfg/archive.yaml --dry-run
+#   python tools/workflow.py --config tools/cfg/archive.yaml
+
+paths:
+  high_quality: datasets/02_high_quality_30
+  yolo: datasets/yolo
+  model_dir: runs/train
+  labelme_final: datasets/05_labelme_final
+  archive: archive
+
+parameters:
+  archive_tag: cjet_dataset
+  archive_note: "每日训练归档"
+
+stages_only:
+  - archive
+
+stages:
+  - name: archive
+    command: >
+      python tools/train/archive.py
+      --sources ${paths.high_quality},${paths.yolo},${paths.model_dir},${paths.labelme_final}
+      --output ${paths.archive}
+      --tag ${parameters.archive_tag}
+      --note "${parameters.archive_note}"

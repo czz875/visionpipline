@@ -1,0 +1,23 @@
+# tools/cfg/orphan_json.yaml
+# 清理孤立 JSON（有 JSON 无图则删 JSON）（tools/clean/orphan_json.py）
+# 默认 dry-run，加 --apply 才真删。
+#
+# 用法：
+#   python tools/workflow.py --config tools/cfg/orphan_json.yaml --dry-run
+#   python tools/workflow.py --config tools/cfg/orphan_json.yaml
+
+paths:
+  dataset_path: datasets/01_annotated
+
+parameters:
+  recursive_flag: "--recursive"
+
+stages_only:
+  - clean_orphan_json
+
+stages:
+  - name: clean_orphan_json
+    command: >
+      python tools/clean/orphan_json.py
+      --dataset-path ${paths.dataset_path}
+      ${parameters.recursive_flag}

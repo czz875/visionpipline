@@ -1,0 +1,28 @@
+# tools/cfg/ir_enhance.yaml
+# IR 图像光照增强（tools/augment/ir_enhance.py）
+#
+# 用法：
+#   python tools/workflow.py --config tools/cfg/ir_enhance.yaml --dry-run
+#   python tools/workflow.py --config tools/cfg/ir_enhance.yaml
+
+paths:
+  raw_data: datasets/raw
+  ir_aug: datasets/raw_ir_aug
+
+parameters:
+  ir_aug_repeat: 3
+  ir_aug_workers: 8
+  ir_aug_local_classes: "all"
+
+stages_only:
+  - ir_enhance
+
+stages:
+  - name: ir_enhance
+    command: >
+      python tools/augment/ir_enhance.py
+      --input-dir ${paths.raw_data}
+      --output-dir ${paths.ir_aug}
+      --repeat ${parameters.ir_aug_repeat}
+      --workers ${parameters.ir_aug_workers}
+      --local-light-classes ${parameters.ir_aug_local_classes}

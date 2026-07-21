@@ -1,0 +1,21 @@
+# tools/cfg/copy_dataset.yaml
+# 复制数据集目录（tools/core/copy_dataset.py）
+# 输入=输出时跳过（原地清理），不同则整体拷贝。
+#
+# 用法：
+#   python tools/workflow.py --config tools/cfg/copy_dataset.yaml --dry-run
+#   python tools/workflow.py --config tools/cfg/copy_dataset.yaml
+
+paths:
+  input_dir: datasets/01_annotated
+  output_dir: datasets/01_annotated_backup
+
+stages_only:
+  - copy_input
+
+stages:
+  - name: copy_input
+    command: >
+      python tools/core/copy_dataset.py
+      --input ${paths.input_dir}
+      --output ${paths.output_dir}

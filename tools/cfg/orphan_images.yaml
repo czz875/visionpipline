@@ -1,0 +1,23 @@
+# tools/cfg/orphan_images.yaml
+# 清理孤立图片（有图无 JSON 则删图）（tools/clean/orphan_images.py）
+# 默认 dry-run，加 --apply 才真删。
+#
+# 用法：
+#   python tools/workflow.py --config tools/cfg/orphan_images.yaml --dry-run
+#   python tools/workflow.py --config tools/cfg/orphan_images.yaml
+
+paths:
+  dataset_path: datasets/01_annotated
+
+parameters:
+  recursive_flag: "--recursive"
+
+stages_only:
+  - remove_orphan_image
+
+stages:
+  - name: remove_orphan_image
+    command: >
+      python tools/clean/orphan_images.py
+      --dataset-path ${paths.dataset_path}
+      ${parameters.recursive_flag}
