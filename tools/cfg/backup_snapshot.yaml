@@ -1,0 +1,26 @@
+# tools/cfg/backup_snapshot.yaml
+# 数据备份打 .tar.gz（tools/backup/snapshot.py）
+#
+# 用法：
+#   python tools/workflow.py --config tools/cfg/backup_snapshot.yaml --dry-run
+#   python tools/workflow.py --config tools/cfg/backup_snapshot.yaml
+
+paths:
+  autolabel: datasets/autolabel
+  behavior: datasets/behavior
+  backup_dir: C:/Users/EDY/Pictures
+
+parameters:
+  snapshot_level: 6
+
+stages_only:
+  - backup_snapshot
+
+stages:
+  - name: backup_snapshot
+    command: >
+      python tools/backup/snapshot.py
+      --sources ${paths.autolabel},${paths.behavior}
+      --output-dir ${paths.backup_dir}
+      --level ${parameters.snapshot_level}
+      --apply

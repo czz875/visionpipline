@@ -1,0 +1,24 @@
+# tools/cfg/create_tar_gz.yaml
+# 压缩归档为 .tar.gz（tools/train/create_tar_gz.py）
+#
+# 用法：
+#   python tools/workflow.py --config tools/cfg/create_tar_gz.yaml --dry-run
+#   python tools/workflow.py --config tools/cfg/create_tar_gz.yaml
+
+paths:
+  archive: archive
+  archive_latest: archive/latest
+
+parameters:
+  tar_gz_level: 6
+
+stages_only:
+  - create_tar_gz
+
+stages:
+  - name: create_tar_gz
+    command: >
+      python tools/train/create_tar_gz.py
+      --input ${paths.archive_latest}
+      --output ${paths.archive}/latest.tar.gz
+      --level ${parameters.tar_gz_level}

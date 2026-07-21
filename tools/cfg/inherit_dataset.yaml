@@ -1,0 +1,27 @@
+# tools/cfg/inherit_dataset.yaml
+# autolabel 按批接续到 behavior（tools/merge/inherit_dataset.py）
+# 默认 dry-run，去 cfg 里加 --apply 或直接命令行加 --apply 才真拷贝。
+#
+# 用法：
+#   python tools/workflow.py --config tools/cfg/inherit_dataset.yaml --dry-run
+#   python tools/workflow.py --config tools/cfg/inherit_dataset.yaml
+
+paths:
+  autolabel: datasets/autolabel
+  behavior: datasets/behavior
+
+parameters:
+  inherit_batch_size: 1000
+  apply_flag: ""  # 改为 "--apply" 启用真正拷贝
+
+stages_only:
+  - inherit_dataset
+
+stages:
+  - name: inherit_dataset
+    command: >
+      python tools/merge/inherit_dataset.py
+      --source ${paths.autolabel}
+      --target ${paths.behavior}
+      --batch-size ${parameters.inherit_batch_size}
+      ${parameters.apply_flag}

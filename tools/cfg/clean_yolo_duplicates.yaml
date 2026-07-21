@@ -1,0 +1,26 @@
+# tools/cfg/clean_yolo_duplicates.yaml
+# 清理 YOLO 标签文件中的重复标注行（tools/clean/yolo_duplicate_labels.py）
+# 默认只预览，确认后加 --apply 才写盘。
+#
+# 用法：
+#   python tools/workflow.py --config tools/cfg/clean_yolo_duplicates.yaml --dry-run
+#   python tools/workflow.py --config tools/cfg/clean_yolo_duplicates.yaml
+
+paths:
+  dataset_path: datasets/yolo
+
+parameters:
+  recursive_flag: "--recursive"
+  tolerance: 1e-6
+
+stages_only:
+  - clean_yolo_duplicates
+
+stages:
+  - name: clean_yolo_duplicates
+    command: >
+      python tools/clean/yolo_duplicate_labels.py
+      --dataset-path ${paths.dataset_path}
+      ${parameters.recursive_flag}
+      --tolerance ${parameters.tolerance}
+      --apply

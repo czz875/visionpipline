@@ -1,0 +1,24 @@
+# tools/cfg/align_labelme.yaml
+# PNG/JSON 文件名对齐脚本（tools/label/align_labelme.py）
+# 默认 dry-run，加 --apply 才真改。
+#
+# 用法：
+#   python tools/workflow.py --config tools/cfg/align_labelme.yaml --dry-run
+#   python tools/workflow.py --config tools/cfg/align_labelme.yaml
+
+paths:
+  behavior: datasets/behavior
+
+parameters:
+  recursive_flag: "--recursive"
+
+stages_only:
+  - align_labelme
+
+stages:
+  - name: align_labelme
+    command: >
+      python tools/label/align_labelme.py
+      --root ${paths.behavior}
+      ${parameters.recursive_flag}
+      --apply

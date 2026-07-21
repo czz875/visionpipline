@@ -1,0 +1,24 @@
+# tools/cfg/timestamp_rename.yaml
+# 按时间戳批量改名（tools/rename/timestamp_rename.py）
+# 默认 dry-run，加 --apply 才真改。
+#
+# 用法：
+#   python tools/workflow.py --config tools/cfg/timestamp_rename.yaml --dry-run
+#   python tools/workflow.py --config tools/cfg/timestamp_rename.yaml
+
+paths:
+  behavior: datasets/behavior
+
+parameters:
+  labelme_sync_flag: "--labelme-sync"
+
+stages_only:
+  - rename_with_labelme_sync
+
+stages:
+  - name: rename_with_labelme_sync
+    command: >
+      python tools/rename/timestamp_rename.py
+      --source-dir ${paths.behavior}
+      ${parameters.labelme_sync_flag}
+      --apply

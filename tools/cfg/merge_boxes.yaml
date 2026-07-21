@@ -1,0 +1,37 @@
+# tools/cfg/merge_boxes.yaml
+# 合并 LabelMe JSON 中距离相近的同标签矩形框（tools/annotate/merge.py）
+#
+# 用法：
+#   python tools/workflow.py --config tools/cfg/merge_boxes.yaml --dry-run
+#   python tools/workflow.py --config tools/cfg/merge_boxes.yaml
+
+paths:
+  annotated: datasets/01_annotated
+
+parameters:
+  merge_distance_x: 100
+  merge_distance_y: 200
+  max_merge_width: 600
+  max_merge_height: 600
+  face_label: face
+  right_cut_ratio: 0.0
+  min_face_width: 100
+  min_face_height: 50
+  max_merge_count: 10
+  max_workers: 12
+
+stages_only:
+  - merge_boxes
+
+stages:
+  - name: merge_boxes
+    command: >
+      python tools/annotate/merge.py
+      --json-dir ${paths.annotated}
+      --face-label ${parameters.face_label}
+      --merge-distance-x ${parameters.merge_distance_x}
+      --merge-distance-y ${parameters.merge_distance_y}
+      --max-merge-width ${parameters.max_merge_width}
+      --max-merge-height ${parameters.max_merge_height}
+      --max-merge-count ${parameters.max_merge_count}
+      --max-workers ${parameters.max_workers}

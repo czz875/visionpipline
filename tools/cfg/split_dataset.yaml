@@ -1,0 +1,28 @@
+# tools/cfg/split_dataset.yaml
+# 数据集拆分（tools/split/dataset.py）
+#
+# 用法：
+#   python tools/workflow.py --config tools/cfg/split_dataset.yaml --dry-run
+#   python tools/workflow.py --config tools/cfg/split_dataset.yaml
+
+paths:
+  annotated: datasets/01_annotated
+  high_quality: datasets/02_high_quality_30
+  remaining: datasets/02_remaining_70
+
+parameters:
+  high_quality_ratio: 0.3
+  split_seed: 42
+
+stages_only:
+  - select_subset
+
+stages:
+  - name: select_subset
+    command: >
+      python tools/split/dataset.py
+      --input ${paths.annotated}
+      --output-a ${paths.high_quality}
+      --output-b ${paths.remaining}
+      --ratio ${parameters.high_quality_ratio}
+      --seed ${parameters.split_seed}

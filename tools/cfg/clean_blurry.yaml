@@ -1,0 +1,27 @@
+# tools/cfg/clean_blurry.yaml
+# CleanVision 模糊检测（tools/clean/blurry.py）
+#
+# 用法：
+#   python tools/workflow.py --config tools/cfg/clean_blurry.yaml --dry-run
+#   python tools/workflow.py --config tools/cfg/clean_blurry.yaml
+
+paths:
+  annotated: datasets/01_annotated
+  blurry_output: datasets/_blurry
+
+parameters:
+  blurry_threshold: 0.185
+  cleanup_crop: "--cleanup-crop"
+
+stages_only:
+  - cleanvisionblurry
+
+stages:
+  - name: cleanvisionblurry
+    command: >
+      python tools/clean/blurry.py
+      --dataset-path ${paths.annotated}
+      --output-path ${paths.blurry_output}
+      --blurry-threshold ${parameters.blurry_threshold}
+      --recursive
+      ${parameters.cleanup_crop}

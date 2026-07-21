@@ -1,0 +1,26 @@
+# tools/cfg/fix_labelme.yaml
+# 修复 LabelMe JSON 常见损坏（tools/label/fix_labelme.py）
+# 默认 dry-run，加 --apply 才真改。
+#
+# 用法：
+#   python tools/workflow.py --config tools/cfg/fix_labelme.yaml --dry-run
+#   python tools/workflow.py --config tools/cfg/fix_labelme.yaml
+
+paths:
+  behavior: datasets/behavior
+
+parameters:
+  recursive_flag: "--recursive"
+  remove_orphan: "-"  # 设为 "--remove-orphan" 启用删除孤立 JSON
+
+stages_only:
+  - fix_labelme
+
+stages:
+  - name: fix_labelme
+    command: >
+      python tools/label/fix_labelme.py
+      --root ${paths.behavior}
+      ${parameters.recursive_flag}
+      ${parameters.remove_orphan}
+      --apply

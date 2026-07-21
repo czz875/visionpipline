@@ -1,0 +1,27 @@
+# tools/cfg/labelme_to_yolo.yaml
+# LabelMe 标注批量转 YOLO 格式（tools/convert/labelme_to_yolo.py）
+#
+# 用法：
+#   python tools/workflow.py --config tools/cfg/labelme_to_yolo.yaml --dry-run
+#   python tools/workflow.py --config tools/cfg/labelme_to_yolo.yaml
+
+paths:
+  behavior: datasets/behavior
+  yolo: datasets/yolo
+
+parameters:
+  yolo_classes: "phone,cigarette,face,hand"
+  ratios: 0.9,0.1
+  seed: 3407
+
+stages_only:
+  - convert_to_yolo
+
+stages:
+  - name: convert_to_yolo
+    command: >
+      python tools/convert/labelme_to_yolo.py
+      --src ${paths.behavior}
+      --out ${paths.yolo}
+      --classes ${parameters.yolo_classes}
+      --ratios ${parameters.ratios}
