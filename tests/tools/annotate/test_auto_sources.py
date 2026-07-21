@@ -18,7 +18,7 @@ np = pytest.importorskip("numpy")
 from tools.annotate.runners.common import BoxSource, build_source  # noqa: E402
 
 
-def testbuild_source_single_label_all_same() -> None:
+def test_build_source_single_label_all_same() -> None:
     """单字符串标签 -> 所有保留框统一标注。"""
     boxes = np.array(
         [[0.0, 0.0, 40.0, 50.0], [0.0, 0.0, 30.0, 30.0]], dtype=np.float32
@@ -29,7 +29,7 @@ def testbuild_source_single_label_all_same() -> None:
     assert src.kept_labels == ["face", "face"]
 
 
-def testbuild_source_list_labels_aligned() -> None:
+def test_build_source_list_labels_aligned() -> None:
     """列表标签 -> 与框逐框对齐（多类别 detectors 场景）。"""
     boxes = np.array(
         [[0.0, 0.0, 40.0, 50.0], [0.0, 0.0, 30.0, 30.0]], dtype=np.float32
@@ -39,7 +39,7 @@ def testbuild_source_list_labels_aligned() -> None:
     assert len(src.kept) == 2
 
 
-def testbuild_source_skips_degenerate_box() -> None:
+def test_build_source_skips_degenerate_box() -> None:
     """退化框（越界/负尺寸）被丢弃，且标签随保留框对齐。"""
     boxes = np.array(
         [[0.0, 0.0, 40.0, 50.0], [-5.0, -5.0, -1.0, -1.0]], dtype=np.float32
@@ -50,7 +50,7 @@ def testbuild_source_skips_degenerate_box() -> None:
     assert src.kept_labels == ["face"]
 
 
-def testbuild_source_ratio_split() -> None:
+def test_build_source_ratio_split() -> None:
     """面积占比低于阈值的框进入 removed，其余进入 kept。"""
     boxes = np.array(
         [[0.0, 0.0, 40.0, 50.0], [0.0, 0.0, 5.0, 5.0]], dtype=np.float32
@@ -60,7 +60,7 @@ def testbuild_source_ratio_split() -> None:
     assert len(src.removed) == 1
 
 
-def testbuild_source_clips_out_of_bounds() -> None:
+def test_build_source_clips_out_of_bounds() -> None:
     """越界框被裁剪到范围内后仍然保留（只要仍有效）。"""
     boxes = np.array([[-5.0, -5.0, 300.0, 300.0]], dtype=np.float32)
     src = build_source(boxes, "face", 0.01, (100, 200, 3))
@@ -69,7 +69,7 @@ def testbuild_source_clips_out_of_bounds() -> None:
     assert src.kept[0].tolist() == [0.0, 0.0, 200.0, 100.0]
 
 
-def testbuild_source_empty() -> None:
+def test_build_source_empty() -> None:
     """空输入返回空保留/删除数组。"""
     boxes = np.empty((0, 4), dtype=np.float32)
     src = build_source(boxes, "face", 0.01, (100, 200, 3))
