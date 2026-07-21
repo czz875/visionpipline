@@ -281,8 +281,8 @@ def inherit_dataset(
 
     if not source_dir.is_dir():
         raise FileNotFoundError(f"源目录不存在：{source_dir}")
-    if not target_dir.is_dir():
-        raise FileNotFoundError(f"目标目录不存在：{target_dir}")
+    # 目标目录不存在时自动创建，便于工作流直接指定一个尚未存在的父目录
+    target_dir.mkdir(parents=True, exist_ok=True)
 
     pairs = collect_pairs(source_dir, recursive=recursive)
     if not pairs:
