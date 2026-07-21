@@ -118,6 +118,16 @@ def run_stage(
 
     if dry_run:
         print("    (dry-run，未实际执行)")
+        if output_var:
+            output_path = _extract_output_path("", command)
+            if output_path:
+                mapping[f"prev.{output_var}"] = output_path
+                print(f"    [变量] prev.{output_var} = {output_path}")
+            else:
+                print(
+                    f"    [警告] 阶段 {name} 声明了 output_var={output_var}，"
+                    f"但未提取到输出路径"
+                )
         return True
 
     result = subprocess.run(
