@@ -43,3 +43,20 @@ def test_run_stage_captures_output_path_in_dry_run(tmp_path):
     ok = workflow.run_stage(stage, mapping, dry_run=True, log_path=log_path)
     assert ok is True
     assert mapping.get("prev.annotated_dir") == "datasets/01_annotated"
+
+
+def test_run_keeps_stages_without_order_sequential(tmp_path, capsys):
+    log_path = tmp_path / "workflow.log"
+    config = {
+        "log_file": str(log_path),
+        "stages": [
+            {"name": "first", "command": "echo first"},
+            {"name": "second", "command": "echo second"},
+        ],
+    }
+    rc = workflow.run(config=config, dry_run=True)
+    assert rc == 0
+    captured = capsys.readouterr().out
+    assert "[并行]" not in captured
+    assert ">>> 阶段：first" in captured
+    assert ">>> 阶段：second" in captured
