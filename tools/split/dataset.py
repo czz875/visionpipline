@@ -16,9 +16,12 @@ if __name__ == "__main__" and __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from tools.core import (
+    build_timestamped_output_dir,
     find_json_for_image,
     list_images,
 )
+
+DEFAULT_OUTPUT_DIR = Path("datasets/split")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -35,14 +38,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-a",
         type=Path,
-        required=True,
-        help="A 份（如高质量 30%）输出目录。",
+        default=None,
+        help="输出目录 A；未指定时自动生成时间戳子目录。",
     )
     parser.add_argument(
         "--output-b",
         type=Path,
-        required=True,
-        help="B 份（如剩余 70%）输出目录。",
+        default=None,
+        help="输出目录 B；未指定时自动生成时间戳子目录。",
     )
     parser.add_argument(
         "--ratio",
@@ -133,17 +136,34 @@ def main() -> int:
         print("[错误] --ratio 必须在 (0, 1) 之间。")
         return 1
 
+    output_a = args.output_a
+    output_b = args.output_b
+    if output_a is None or output_b is None:
+        base = Path(DEFAULT_OUTPUT_DIR)
+        base.mkdir(parents=True, exist_ok=True)
+        if output_a is None:
+            output_a = build_timestamped_output_dir(base, "split_a")
+        if output_b is None:
+            output_b = build_timestamped_output_dir(base, "split_b")
+    else:
+        output_a = Path(output_a)
+        output_b = Path(output_b)
+        output_a.mkdir(parents=True, exist_ok=True)
+        output_b.mkdir(parents=True, exist_ok=True)
+
     count_a, count_b = split_dataset(
         args.input.resolve(),
-        args.output_a.resolve(),
-        args.output_b.resolve(),
+        output_a.resolve(),
+        output_b.resolve(),
         args.ratio,
         args.seed,
         args.copy,
     )
 
-    print(f"A 份：{count_a} 张 -> {args.output_a}")
-    print(f"B 份：{count_b} 张 -> {args.output_b}")
+    print(f"A 份：{count_a} 张 -> {output_a}")
+    print(f"B 份：{count_b} 张 -> {output_b}")
+    print(f"OUTPUT_PATH_A:{output_a.resolve()}")
+    print(f"OUTPUT_PATH_B:{output_b.resolve()}")
     return 0
 
 

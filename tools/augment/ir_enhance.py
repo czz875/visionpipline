@@ -40,13 +40,15 @@ from tqdm import tqdm
 if __name__ == "__main__" and __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+from tools.core import build_timestamped_output_dir  # noqa: E402
+
 
 # =============================================================================
 # 1. 默认参数
 # =============================================================================
 
 DEFAULT_INPUT_DIR = r"D:\A_CJET_WORKSPACE\01_CJET_DATASET\11_activateBody\yongqing_all_txt"
-DEFAULT_OUTPUT_DIR = r"D:\A_CJET_WORKSPACE\01_CJET_DATASET\11_activateBody\yongqing_all_enh"
+DEFAULT_OUTPUT_DIR = Path("datasets/raw_ir_aug")
 DEFAULT_REPEAT = 3
 DEFAULT_MAX_WORKERS = 8
 DEFAULT_LOCAL_LIGHT_EXPAND_MIN = 1.25
@@ -443,8 +445,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path(DEFAULT_OUTPUT_DIR),
-        help=f"输出数据集根目录（默认：{DEFAULT_OUTPUT_DIR}）。",
+        default=None,
+        help="输出目录；未指定时自动生成时间戳子目录。",
     )
     parser.add_argument(
         "--repeat",
@@ -491,9 +493,17 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+
+    output_dir = args.output_dir
+    if output_dir is None:
+        output_dir = build_timestamped_output_dir(DEFAULT_OUTPUT_DIR, "ir_enhance")
+    else:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
     augment_dataset(
         input_dir=args.input_dir,
-        output_dir=args.output_dir,
+        output_dir=output_dir,
         repeat=args.repeat,
         max_workers=args.workers,
         class_filter=_parse_classes(args.local_light_classes),
@@ -501,6 +511,7 @@ def main() -> int:
         expand_max=args.expand_max,
         recursive=args.recursive,
     )
+    print(f"OUTPUT_PATH:{output_dir.resolve()}")
     return 0
 
 
