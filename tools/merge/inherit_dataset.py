@@ -485,6 +485,8 @@ def main() -> int:
 
     if args.dry_run:
         print("\n（这是 dry-run 预览，加上 --apply 才会真正执行）")
+
+    print(f"OUTPUT_PATH:{args.target.resolve()}")
     return 0
 
 
