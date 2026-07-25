@@ -21,6 +21,9 @@ from typing import Any
 if __name__ == "__main__" and __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+# 默认参数（集中放文件顶部）
+DEFAULT_OUTPUT_DIR = Path("datasets/01_annotated")
+
 
 def ensure_local_supervision_import() -> None:
     """将仓库 ``src/`` 插入 ``sys.path`` 前部，优先使用本地开发版 supervision。
@@ -35,11 +38,20 @@ def ensure_local_supervision_import() -> None:
 
 
 def _resolve_output_dir(args: Any) -> Any:
-    """给 args.output 追加 ``<prefix>_YYYYMMDD_HHMMSS`` 子目录。"""
+    """解析输出目录。
+
+    当 ``args.output`` 显式传入时直接使用该路径（创建父目录）；
+    仅当 ``args.output`` 为 ``None`` 时，才在默认目录下追加
+    ``<prefix>_YYYYMMDD_HHMMSS`` 时间戳子目录。
+    """
     from tools.core import build_timestamped_output_dir
 
-    if getattr(args, "output", None) is None:
-        return args.output
+    explicit_output = getattr(args, "output", None)
+    if explicit_output is not None:
+        path = Path(explicit_output)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+
     if getattr(args, "mosaic_existing", False):
         prefix = "mosaic"
     elif getattr(args, "detectors_config", None):
@@ -48,7 +60,7 @@ def _resolve_output_dir(args: Any) -> Any:
         prefix = str(args.model_type)
     else:
         prefix = "annotate"
-    return build_timestamped_output_dir(args.output, prefix)
+    return build_timestamped_output_dir(DEFAULT_OUTPUT_DIR, prefix)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -60,20 +72,23 @@ def main(argv: list[str] | None = None) -> int:
     from tools.annotate.runners.supervision import run_supervision
 
     parser = build_parser()
+    parser.set_defaults(output=None)
     args = parser.parse_args(argv)
     args.output = _resolve_output_dir(args)
 
     if args.mosaic_existing:
-        return run_mosaic(args)
+        ret = run_mosaic(args)
+    elif args.detectors_config:
+        ret = run_multi(args)
+    elif args.model_type == "onnx":
+        ret = run_onnx(args)
+    else:
+        ensure_local_supervision_import()
+        ret = run_supervision(args)
 
-    if args.detectors_config:
-        return run_multi(args)
-
-    if args.model_type == "onnx":
-        return run_onnx(args)
-
-    ensure_local_supervision_import()
-    return run_supervision(args)
+    if args.output is not None:
+        print(f"OUTPUT_PATH:{args.output.resolve()}")
+    return ret
 
 
 if __name__ == "__main__":

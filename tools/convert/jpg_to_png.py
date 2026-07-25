@@ -26,6 +26,7 @@ import cv2
 if __name__ == "__main__" and __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+from tools.core import build_timestamped_output_dir  # noqa: E402
 from tools.core.labelme import load_labelme, save_labelme  # noqa: E402
 
 # =============================================================================
@@ -33,7 +34,7 @@ from tools.core.labelme import load_labelme, save_labelme  # noqa: E402
 # =============================================================================
 
 DEFAULT_INPUT_DIR = r"E:\czz\0024"
-DEFAULT_OUTPUT_DIR = r"E:\czz\0024\PNG"
+DEFAULT_OUTPUT_DIR = Path("datasets/raw")
 DEFAULT_NUM_THREADS = 16
 DEFAULT_PNG_COMPRESSION = 9
 DEFAULT_JPG_SUFFIXES: tuple[str, ...] = (".jpg", ".jpeg")
@@ -258,8 +259,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path(DEFAULT_OUTPUT_DIR),
-        help=f"PNG 输出目录（默认：{DEFAULT_OUTPUT_DIR}）。",
+        default=None,
+        help="输出目录；未指定时自动生成时间戳子目录。",
     )
     parser.add_argument(
         "--num-threads",
@@ -285,13 +286,22 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+
+    output_dir = args.output
+    if output_dir is None:
+        output_dir = build_timestamped_output_dir(DEFAULT_OUTPUT_DIR, "jpg_to_png")
+    else:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
     convert_jpg_to_png(
         input_dir=args.input,
-        output_dir=args.output,
+        output_dir=output_dir,
         num_threads=args.num_threads,
         png_compression=args.png_compression,
         recursive=args.recursive,
     )
+    print(f"OUTPUT_PATH:{output_dir.resolve()}")
     return 0
 
 

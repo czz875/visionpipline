@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -78,6 +79,42 @@ DEFAULT_LOG_FILE = DEFAULT_LOG                    # workflow.log（在 tools/cfg
 # 2. Stage 执行
 # =============================================================================
 
+_OUTPUT_PATH_RE = re.compile(r"^OUTPUT_PATH:(.+)$", re.MULTILINE)
+_OUTPUT_ARG_RE = re.compile(r"--output(?:-dir|-a|-b)?\s+(\S+)")
+
+
+def _extract_output_path(stdout_text: str, command: str) -> str | None:
+    """从 stdout 或 command 的输出参数提取输出路径。"""
+    m = _OUTPUT_PATH_RE.search(stdout_text)
+    if m:
+        return m.group(1).strip()
+    m = _OUTPUT_ARG_RE.search(command)
+    if m:
+        return m.group(1)
+    return None
+
+
+def _capture_output_var(
+    stage: dict,
+    stdout_text: str,
+    command: str,
+    mapping: dict[str, str],
+) -> None:
+    """若 stage 声明了 output_var，从 stdout 或 command 的 --output 提取路径并写入 mapping。"""
+    output_var = stage.get("output_var", "")
+    if not output_var:
+        return
+    name = stage.get("name", "unnamed")
+    output_path = _extract_output_path(stdout_text, command)
+    if output_path:
+        mapping[f"prev.{output_var}"] = output_path
+        print(f"    [变量] prev.{output_var} = {output_path}")
+    else:
+        print(
+            f"    [警告] 阶段 {name} 声明了 output_var={output_var}，"
+            f"但未提取到输出路径"
+        )
+
 
 def run_stage(
     stage: dict,
@@ -103,11 +140,22 @@ def run_stage(
 
     if dry_run:
         print("    (dry-run，未实际执行)")
+        _capture_output_var(stage, "", command, mapping)
         return True
 
-    result = subprocess.run(command, shell=True, cwd=PROJECT_ROOT)
+    result = subprocess.run(
+        command, shell=True, cwd=PROJECT_ROOT, capture_output=True, text=True
+    )
+
+    if result.stdout:
+        for line in result.stdout.splitlines():
+            print(f"    {line}")
+
     if result.returncode != 0:
         print(f"    [失败] 阶段 {name} 返回码 {result.returncode}")
+        if result.stderr:
+            for line in result.stderr.splitlines():
+                print(f"    {line}")
         with log_path.open("a", encoding="utf-8") as log:
             log.write(
                 f"[{datetime.now().isoformat(timespec='seconds')}] "
@@ -116,6 +164,9 @@ def run_stage(
         return False
 
     print(f"    [完成] 阶段 {name}")
+
+    _capture_output_var(stage, result.stdout, command, mapping)
+
     return True
 
 
@@ -159,26 +210,51 @@ def run_group(
             run_stage(s, mapping, True, log_path)
         return True
 
-    procs: list[tuple[dict, subprocess.Popen]] = []
+    procs: list[tuple[dict, str, subprocess.Popen]] = []
     for s in active:
         command = substitute_variables(s.get("command", ""), mapping)
         now = datetime.now().isoformat(timespec="seconds")
         print(f"\n[{now}] >>> [并行] 阶段：{s.get('name', 'unnamed')}\n    {command}")
         with log_path.open("a", encoding="utf-8") as log:
             log.write(f"[{now}] [{s.get('name', 'unnamed')}] {command}\n")
-        procs.append((s, subprocess.Popen(command, shell=True, cwd=PROJECT_ROOT)))
+        procs.append(
+            (
+                s,
+                command,
+                subprocess.Popen(
+                    command,
+                    shell=True,
+                    cwd=PROJECT_ROOT,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                ),
+            )
+        )
 
     ok = True
-    for s, proc in procs:
-        proc.wait()
+    for s, command, proc in procs:
+        stdout, stderr = proc.communicate()
+        name = s.get("name", "unnamed")
+
+        if stdout:
+            for line in stdout.splitlines():
+                print(f"    {line}")
+
         if proc.returncode != 0:
-            print(f"    [失败] 阶段 {s.get('name', 'unnamed')} 返回码 {proc.returncode}")
+            print(f"    [失败] 阶段 {name} 返回码 {proc.returncode}")
+            if stderr:
+                for line in stderr.splitlines():
+                    print(f"    {line}")
             with log_path.open("a", encoding="utf-8") as log:
                 log.write(
                     f"[{datetime.now().isoformat(timespec='seconds')}] "
-                    f"[{s.get('name', 'unnamed')}] FAILED rc={proc.returncode}\n"
+                    f"[{name}] FAILED rc={proc.returncode}\n"
                 )
             ok = False
+        else:
+            print(f"    [完成] 阶段 {name}")
+            _capture_output_var(s, stdout, command, mapping)
     return ok
 
 
@@ -285,7 +361,12 @@ def run(
     )
     groups: list[list[dict]] = []
     for _idx, stage in ordered:
-        if groups and _order_value(groups[-1][-1], 0) == _order_value(stage, 0):
+        if (
+            groups
+            and groups[-1][-1].get("order") is not None
+            and stage.get("order") is not None
+            and int(groups[-1][-1]["order"]) == int(stage["order"])
+        ):
             groups[-1].append(stage)
         else:
             groups.append([stage])
