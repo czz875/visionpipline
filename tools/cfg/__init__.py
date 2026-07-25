@@ -29,6 +29,7 @@ tools/cfg
 
 from __future__ import annotations
 
+import glob
 import json
 import re
 import sys
@@ -53,6 +54,7 @@ PROJECT_EXAMPLE_CFG_PATH = CFG_DIR / "workflow_config.yaml.example"  # 同上示
 DEFAULT_LOG = Path("workflow.log")                 # 默认日志名（相对项目根）
 
 _PLACEHOLDER_RE = re.compile(r"\$\{([^}]+)\}")
+_LATEST_TIMESTAMP_RE = re.compile(r".*_(\d{8}_\d{6})(?:_\d+)?$")
 
 
 # =============================================================================
@@ -103,10 +105,39 @@ def flatten_dict(
     return items
 
 
+def resolve_latest_path(pattern: str) -> str | None:
+    """按 glob pattern 查找带时间戳的目录，返回最新一个目录路径；无匹配返回 ``None``。"""
+    candidates: list[tuple[str, str]] = []
+    for path_str in glob.glob(pattern):
+        path = Path(path_str)
+        if not path.is_dir():
+            continue
+        m = _LATEST_TIMESTAMP_RE.match(path.name)
+        if not m:
+            continue
+        candidates.append((m.group(1), path_str))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return candidates[0][1]
+
+
 def substitute_variables(command: str, mapping: dict[str, str]) -> str:
-    """把命令中的 ``${prefix.key}`` 占位符替换为 ``mapping`` 里的值；找不到则保留原占位符。"""
+    """把命令中的 ``${prefix.key}`` 占位符替换为 ``mapping`` 里的值；找不到则保留原占位符。
+
+    支持 ``${latest:glob_pattern}`` 特殊变量：匹配到的最新时间戳目录会被替换为目录路径；
+    无匹配时打印警告并保留原占位符。
+    """
     def _repl(match: re.Match) -> str:
-        return mapping.get(match.group(1), match.group(0))
+        var = match.group(1)
+        if var.startswith("latest:"):
+            pattern = var[7:]
+            latest = resolve_latest_path(pattern)
+            if latest is None:
+                print(f"警告：未找到匹配目录，保留占位符 ${{{var}}}")
+                return match.group(0)
+            return latest
+        return mapping.get(var, match.group(0))
     return _PLACEHOLDER_RE.sub(_repl, command)
 
 
@@ -219,5 +250,6 @@ __all__ = [
     "load_config",
     "merge_configs",
     "resolve_config",
+    "resolve_latest_path",
     "substitute_variables",
 ]

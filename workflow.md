@@ -228,6 +228,54 @@ JPG 原始数据（可选）──► tools/convert/jpg_to_png.py ──► PNG
 
 ---
 
+## 工作流变量与脚本输出约定
+
+### 新增变量
+
+除已有的 `${paths.xxx}`、`${parameters.xxx}`、`${project.xxx}` 外，工作流还支持：
+
+- `${prev.<var>}`：上游 stage 声明的 `output_var` 所代表的实际输出路径。
+- `${latest:<glob>}`：匹配 glob 的目录中，按目录名时间戳最新的一个。
+
+### stage 输出路径传递
+
+stage 可声明 `output_var`，工作流会自动捕获其 stdout 中的 `OUTPUT_PATH:` 行：
+
+```yaml
+stages:
+  - name: auto_annotate
+    output_var: annotated_dir
+    command: >
+      python tools/annotate/auto.py
+      --source ${paths.raw_data}
+      --output ${paths.annotated}
+      --format labelme
+
+  - name: merge_boxes
+    command: >
+      python tools/annotate/merge.py
+      --json-dir ${prev.annotated_dir}
+```
+
+### 脚本输出约定
+
+会写盘的脚本未指定 `--output` 时，会自动生成 `[function_name]_[YYYYMMDD_HHMMSS]` 时间戳子目录，并在 stdout 输出：
+
+```text
+OUTPUT_PATH:datasets/01_annotated/auto_annotate_20260721_153022
+```
+
+### 使用 ${latest:...} 查找最新目录
+
+临时 cfg 或不方便声明 `output_var` 时，可用 `${latest:glob}`：
+
+```yaml
+- name: merge_boxes
+  command: python tools/annotate/merge.py --json-dir ${latest:datasets/01_annotated/*}
+```
+
+---
+
 ## 每日定时交付
 
 用 Windows 任务计划程序 / Linux cron 在每天 17:00 前触发即可。

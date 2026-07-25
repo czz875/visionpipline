@@ -59,3 +59,18 @@ paths:
 #     enabled: false
 #   - name: create_tar_gz
 #     enabled: false
+
+# ---------- 示例：stage 输出路径自动接续 ----------
+# stages:
+#   - name: auto_annotate
+#     output_var: annotated_dir
+#     command: >
+#       python tools/annotate/auto.py
+#       --source ${paths.raw_data}
+#       --output ${paths.annotated}
+#       --format labelme
+#
+#   - name: merge_boxes
+#     command: >
+#       python tools/annotate/merge.py
+#       --json-dir ${prev.annotated_dir}

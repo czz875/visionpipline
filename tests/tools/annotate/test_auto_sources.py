@@ -1,5 +1,5 @@
 """
-tools/annotate/auto.py 中 ``_build_source`` 的单测：验证「框 -> 保留/删除 +
+tools/annotate/auto.py 中 ``build_source`` 的单测：验证「框 -> 保留/删除 +
 逐框标签对齐」逻辑，尤其是多检测器组合里同路多类别、退化框跳过等边界。
 """
 
@@ -15,7 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 
 np = pytest.importorskip("numpy")
-from tools.annotate.auto import _BoxSource, _build_source  # noqa: E402
+from tools.annotate.runners.common import BoxSource, build_source  # noqa: E402
 
 
 def test_build_source_single_label_all_same() -> None:
@@ -23,8 +23,8 @@ def test_build_source_single_label_all_same() -> None:
     boxes = np.array(
         [[0.0, 0.0, 40.0, 50.0], [0.0, 0.0, 30.0, 30.0]], dtype=np.float32
     )
-    src = _build_source(boxes, "face", 0.01, (100, 200, 3))
-    assert isinstance(src, _BoxSource)
+    src = build_source(boxes, "face", 0.01, (100, 200, 3))
+    assert isinstance(src, BoxSource)
     assert len(src.kept) == 2
     assert src.kept_labels == ["face", "face"]
 
@@ -34,7 +34,7 @@ def test_build_source_list_labels_aligned() -> None:
     boxes = np.array(
         [[0.0, 0.0, 40.0, 50.0], [0.0, 0.0, 30.0, 30.0]], dtype=np.float32
     )
-    src = _build_source(boxes, ["face", "phone"], 0.01, (100, 200, 3))
+    src = build_source(boxes, ["face", "phone"], 0.01, (100, 200, 3))
     assert src.kept_labels == ["face", "phone"]
     assert len(src.kept) == 2
 
@@ -44,7 +44,7 @@ def test_build_source_skips_degenerate_box() -> None:
     boxes = np.array(
         [[0.0, 0.0, 40.0, 50.0], [-5.0, -5.0, -1.0, -1.0]], dtype=np.float32
     )
-    src = _build_source(boxes, ["face", "phone"], 0.01, (100, 200, 3))
+    src = build_source(boxes, ["face", "phone"], 0.01, (100, 200, 3))
     # 第二框退化被跳过，只保留第一框，其标签应为 face
     assert len(src.kept) == 1
     assert src.kept_labels == ["face"]
@@ -55,7 +55,7 @@ def test_build_source_ratio_split() -> None:
     boxes = np.array(
         [[0.0, 0.0, 40.0, 50.0], [0.0, 0.0, 5.0, 5.0]], dtype=np.float32
     )
-    src = _build_source(boxes, "face", 0.01, (100, 200, 3))
+    src = build_source(boxes, "face", 0.01, (100, 200, 3))
     assert len(src.kept) == 1
     assert len(src.removed) == 1
 
@@ -63,7 +63,7 @@ def test_build_source_ratio_split() -> None:
 def test_build_source_clips_out_of_bounds() -> None:
     """越界框被裁剪到范围内后仍然保留（只要仍有效）。"""
     boxes = np.array([[-5.0, -5.0, 300.0, 300.0]], dtype=np.float32)
-    src = _build_source(boxes, "face", 0.01, (100, 200, 3))
+    src = build_source(boxes, "face", 0.01, (100, 200, 3))
     assert len(src.kept) == 1
     # 裁剪后应为 [0,0,200,100]
     assert src.kept[0].tolist() == [0.0, 0.0, 200.0, 100.0]
@@ -72,7 +72,7 @@ def test_build_source_clips_out_of_bounds() -> None:
 def test_build_source_empty() -> None:
     """空输入返回空保留/删除数组。"""
     boxes = np.empty((0, 4), dtype=np.float32)
-    src = _build_source(boxes, "face", 0.01, (100, 200, 3))
+    src = build_source(boxes, "face", 0.01, (100, 200, 3))
     assert src.kept.shape == (0, 4)
     assert src.removed.shape == (0, 4)
     assert src.kept_labels == []
