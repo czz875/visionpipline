@@ -16,7 +16,13 @@ from tqdm import tqdm
 
 from tools.annotate.backends.onnx import OnnxDetector
 from tools.annotate.backends.sam import SAMTextDetector
-from tools.core import find_json_for_image, list_images, save_labelme
+from tools.annotate.defaults import DEFAULT_OUTPUT_DIR
+from tools.core import (
+    build_batch_stage_dir,
+    find_json_for_image,
+    list_images,
+    save_labelme,
+)
 from tools.annotate.ops import extract_existing_label_boxes, rewrite_labelme_dict
 from tools.annotate.runners.common import (
     BoxSource,
@@ -37,6 +43,17 @@ def run_onnx(args) -> int:
     """
     source = Path(args.source) if args.source else None
     output = Path(args.output) if args.output else None
+
+    images: list[Path] = []
+    if not args.reannotate:
+        if source is None or not source.is_dir():
+            print("[错误] 请通过 --source 指定输入图片目录。", file=sys.stderr)
+            return 1
+        images = list_images(source, recursive=args.recursive)
+        if not images:
+            print(f"[错误] 文件夹内没有图片：{source}", file=sys.stderr)
+            return 1
+        print(f"[信息] 共发现 {len(images)} 张图片")
 
     onnx_detector = OnnxDetector(
         args.onnx_model,
@@ -116,16 +133,12 @@ def run_onnx(args) -> int:
         return 0
 
     # ---- 标注模式：写入输出目录 ----
-    if source is None or not source.is_dir():
-        print("[错误] 请通过 --source 指定输入图片目录。", file=sys.stderr)
-        return 1
-    images = list_images(source, recursive=args.recursive)
-    if not images:
-        print(f"[错误] 文件夹内没有图片：{source}", file=sys.stderr)
-        return 1
-    print(f"[信息] 共发现 {len(images)} 张图片")
     if not args.dry_run and output is not None:
-        output.mkdir(parents=True, exist_ok=True)
+        if output.resolve() == DEFAULT_OUTPUT_DIR.resolve():
+            output = build_batch_stage_dir(output)
+        else:
+            output.mkdir(parents=True, exist_ok=True)
+        args.output = output
 
     # --no-blackout：比例阈值视为 0，保留全部框（小框不打码、不删除），供后续合并。
     eff_onnx_ratio = 0.0 if args.no_blackout else args.onnx_min_ratio
