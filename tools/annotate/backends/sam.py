@@ -82,6 +82,8 @@ class SAMTextDetector:
             "task": "segment",
             "mode": "predict",
             "model": str(model_path),
+            "save": False,
+            "verbose": False,
         }
         if device:
             overrides["device"] = device
