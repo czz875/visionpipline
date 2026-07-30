@@ -6,6 +6,11 @@ auto.py 及其 runner / parser 共享的默认参数常量。
 
 from __future__ import annotations
 
+from pathlib import Path
+
+# 项目标准标注输出目录
+DEFAULT_OUTPUT_DIR = Path("datasets/01_annotated")
+
 # supervision 后端
 DEFAULT_MODEL_TYPE = "yolo"
 DEFAULT_YOLO_MODEL = "yolov8n.pt"

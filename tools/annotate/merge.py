@@ -22,6 +22,7 @@ if __name__ == "__main__" and __package__ in (None, ""):
 from tools.core import (
     list_labelme_files,
     load_labelme,
+    resolve_latest_batch_stage_dir,
     save_labelme,
 )
 from tools.core.geometry import (
@@ -42,6 +43,11 @@ DEFAULT_MAX_MERGE_WIDTH = 600
 DEFAULT_MAX_MERGE_HEIGHT = 600
 DEFAULT_MAX_MERGE_COUNT = 10
 DEFAULT_MAX_WORKERS = 12
+
+
+def _resolve_json_dir(json_dir: Path) -> Path:
+    """把逻辑标注目录解析为最新批次中的实际目录。"""
+    return resolve_latest_batch_stage_dir(json_dir)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -233,7 +239,9 @@ def main() -> int:
     """脚本入口。"""
     parser = _build_parser()
     args = parser.parse_args()
-    process_json_dir_mt(args.json_dir.resolve(), args)
+    json_dir = _resolve_json_dir(args.json_dir.resolve())
+    process_json_dir_mt(json_dir, args)
+    print(f"OUTPUT_PATH:{json_dir}")
     print("Done.")
     return 0
 

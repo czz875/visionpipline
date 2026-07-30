@@ -21,8 +21,7 @@ from typing import Any
 if __name__ == "__main__" and __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-# 默认参数（集中放文件顶部）
-DEFAULT_OUTPUT_DIR = Path("datasets/01_annotated")
+from tools.core import resolve_latest_batch_stage_dir
 
 
 def ensure_local_supervision_import() -> None:
@@ -37,30 +36,24 @@ def ensure_local_supervision_import() -> None:
         sys.path.insert(0, src_path)
 
 
-def _resolve_output_dir(args: Any) -> Any:
-    """解析输出目录。
-
-    当 ``args.output`` 显式传入时直接使用该路径（创建父目录）；
-    仅当 ``args.output`` 为 ``None`` 时，才在默认目录下追加
-    ``<prefix>_YYYYMMDD_HHMMSS`` 时间戳子目录。
-    """
-    from tools.core import build_timestamped_output_dir
-
-    explicit_output = getattr(args, "output", None)
-    if explicit_output is not None:
-        path = Path(explicit_output)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        return path
-
+def _resolve_batch_paths(args: Any) -> None:
+    """解析当前模式使用的输入与输出批次目录。"""
     if getattr(args, "mosaic_existing", False):
-        prefix = "mosaic"
-    elif getattr(args, "detectors_config", None):
-        prefix = "multi"
-    elif getattr(args, "model_type", None):
-        prefix = str(args.model_type)
-    else:
-        prefix = "annotate"
-    return build_timestamped_output_dir(DEFAULT_OUTPUT_DIR, prefix)
+        path = resolve_latest_batch_stage_dir(Path(args.source))
+        args.source = path
+        args.output = path
+        return
+
+    if getattr(args, "detectors_config", None):
+        return
+
+    if getattr(args, "reannotate", False):
+        return
+
+    path = Path(args.output)
+    if not (getattr(args, "dry_run", False) and getattr(args, "model_type", None) == "onnx"):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    args.output = path
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -72,9 +65,8 @@ def main(argv: list[str] | None = None) -> int:
     from tools.annotate.runners.supervision import run_supervision
 
     parser = build_parser()
-    parser.set_defaults(output=None)
     args = parser.parse_args(argv)
-    args.output = _resolve_output_dir(args)
+    _resolve_batch_paths(args)
 
     if args.mosaic_existing:
         ret = run_mosaic(args)

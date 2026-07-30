@@ -30,6 +30,7 @@ from tools.annotate.defaults import (
     DEFAULT_ONNX_NORMALIZE,
     DEFAULT_ONNX_SCORE_INDICES,
     DEFAULT_ONNX_TRANSPOSE,
+    DEFAULT_OUTPUT_DIR,
     DEFAULT_SAM_CONF,
     DEFAULT_SAM_LABEL,
     DEFAULT_SAM_MIN_RATIO,
@@ -74,8 +75,8 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"输入图片目录，默认为 {DEFAULT_SOURCE}",
     )
     parser.add_argument(
-        "--output", default=None,
-        help="输出目录；未指定时自动生成时间戳子目录。",
+        "--output", default=DEFAULT_OUTPUT_DIR,
+        help=f"输出目录；未指定时以 {DEFAULT_OUTPUT_DIR} 为标准目录，实际批次由运行模式决定。",
     )
     parser.add_argument(
         "--format",

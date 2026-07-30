@@ -4,6 +4,58 @@ from pathlib import Path
 from tools import workflow
 
 
+def test_run_stage_realtime_forwards_stderr_and_captures_stdout(
+    tmp_path, capfd
+):
+    child_script = tmp_path / "child_stage.py"
+    child_script.write_text(
+        "import sys\n"
+        'print("progress 1/1", file=sys.stderr, flush=True)\n'
+        'print("OUTPUT_PATH:datasets/batch_test/01_annotated", flush=True)\n',
+        encoding="utf-8",
+    )
+    log_path = tmp_path / "workflow.log"
+    stage = {
+        "name": "realtime_stage",
+        "command": f'"{sys.executable}" "{child_script}"',
+        "output_var": "annotated_output",
+    }
+    mapping = {}
+
+    ok = workflow.run_stage(stage, mapping, dry_run=False, log_path=log_path)
+
+    captured = capfd.readouterr()
+    assert ok is True
+    assert "progress 1/1" in captured.err
+    assert "OUTPUT_PATH:datasets/batch_test/01_annotated" in captured.out
+    assert (
+        mapping["prev.annotated_output"]
+        == "datasets/batch_test/01_annotated"
+    )
+
+
+def test_run_stage_realtime_forwards_failure_stderr(tmp_path, capfd):
+    child_script = tmp_path / "failed_stage.py"
+    child_script.write_text(
+        "import sys\n"
+        'print("failure detail", file=sys.stderr, flush=True)\n'
+        "raise SystemExit(3)\n",
+        encoding="utf-8",
+    )
+    log_path = tmp_path / "workflow.log"
+    stage = {
+        "name": "failed_stage",
+        "command": f'"{sys.executable}" "{child_script}"',
+    }
+
+    ok = workflow.run_stage(stage, {}, dry_run=False, log_path=log_path)
+
+    captured = capfd.readouterr()
+    assert ok is False
+    assert "failure detail" in captured.err
+    assert "FAILED rc=3" in log_path.read_text(encoding="utf-8")
+
+
 def test_run_stage_captures_output_path(tmp_path):
     log_path = tmp_path / "workflow.log"
     stage = {

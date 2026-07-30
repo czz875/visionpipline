@@ -143,29 +143,35 @@ def run_stage(
         _capture_output_var(stage, "", command, mapping)
         return True
 
-    result = subprocess.run(
-        command, shell=True, cwd=PROJECT_ROOT, capture_output=True, text=True
+    process = subprocess.Popen(
+        command,
+        shell=True,
+        cwd=PROJECT_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=None,
+        text=True,
+        bufsize=1,
     )
+    stdout_lines: list[str] = []
+    assert process.stdout is not None
+    for line in process.stdout:
+        stdout_lines.append(line)
+        print(f"    {line}", end="")
+    return_code = process.wait()
+    stdout_text = "".join(stdout_lines)
 
-    if result.stdout:
-        for line in result.stdout.splitlines():
-            print(f"    {line}")
-
-    if result.returncode != 0:
-        print(f"    [失败] 阶段 {name} 返回码 {result.returncode}")
-        if result.stderr:
-            for line in result.stderr.splitlines():
-                print(f"    {line}")
+    if return_code != 0:
+        print(f"    [失败] 阶段 {name} 返回码 {return_code}")
         with log_path.open("a", encoding="utf-8") as log:
             log.write(
                 f"[{datetime.now().isoformat(timespec='seconds')}] "
-                f"[{name}] FAILED rc={result.returncode}\n"
+                f"[{name}] FAILED rc={return_code}\n"
             )
         return False
 
     print(f"    [完成] 阶段 {name}")
 
-    _capture_output_var(stage, result.stdout, command, mapping)
+    _capture_output_var(stage, stdout_text, command, mapping)
 
     return True
 

@@ -79,6 +79,11 @@ from tqdm import tqdm
 if __name__ == "__main__" and __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+from tools.core import (
+    build_related_batch_stage_dir,
+    resolve_latest_batch_stage_dir,
+)
+
 
 # =============================================================================
 # 1. 默认参数
@@ -126,6 +131,15 @@ class Pair:
 # =============================================================================
 # 3. 核心逻辑
 # =============================================================================
+
+
+def _resolve_group_dirs(source_dir: Path, target_dir: Path) -> tuple[Path, Path]:
+    """解析当前批次的加密输入与分组输出目录。"""
+    source = resolve_latest_batch_stage_dir(source_dir)
+    if not source.is_dir():
+        return source, Path(target_dir)
+    target = build_related_batch_stage_dir(source, target_dir)
+    return source, target
 
 
 def discover_max_batch(target_dir: Path) -> int:
@@ -456,10 +470,12 @@ def main() -> int:
             print(f"[错误] --start-batches 必须是 4 位数字字符串：{b}")
             return 1
 
+    source_dir, target_dir = _resolve_group_dirs(args.source, args.target)
+
     try:
         reports = inherit_dataset(
-            args.source,
-            args.target,
+            source_dir,
+            target_dir,
             batch_size=args.batch_size,
             dry_run=args.dry_run,
             move=args.move,
@@ -486,7 +502,7 @@ def main() -> int:
     if args.dry_run:
         print("\n（这是 dry-run 预览，加上 --apply 才会真正执行）")
 
-    print(f"OUTPUT_PATH:{args.target.resolve()}")
+    print(f"OUTPUT_PATH:{target_dir.resolve()}")
     return 0
 
 

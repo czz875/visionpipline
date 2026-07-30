@@ -22,7 +22,7 @@ from tools.annotate.backends import (
 )
 from tools.annotate.backends.onnx import OnnxDetector
 from tools.annotate.backends.sam import SAMTextDetector
-from tools.core import list_images
+from tools.core import build_batch_stage_dir, list_images
 from tools.annotate.defaults import (
     DEFAULT_CONF,
     DEFAULT_IMGSZ,
@@ -31,6 +31,7 @@ from tools.annotate.defaults import (
     DEFAULT_ONNX_NORMALIZE,
     DEFAULT_ONNX_SCORE_INDICES,
     DEFAULT_ONNX_TRANSPOSE,
+    DEFAULT_OUTPUT_DIR,
     DEFAULT_SAM_CONF,
     DEFAULT_VERBOSE,
 )
@@ -208,8 +209,8 @@ def run_multi(args) -> int:
         return 1
 
     # 全局项：优先取 YAML，其次回退到 CLI 默认。
-    source = Path(cfg.get("source", args.source))
-    output = Path(cfg.get("output", args.output))
+    source = Path(cfg.get("source") or args.source)
+    output = Path(cfg.get("output") or args.output or DEFAULT_OUTPUT_DIR)
     recursive = bool(cfg.get("recursive", args.recursive))
     use_mosaic = not bool(cfg.get("blackout", False))  # 默认马赛克，blackout: true 用纯黑
     mosaic_block = int(cfg.get("mosaic_block", args.mosaic_block))
@@ -229,7 +230,12 @@ def run_multi(args) -> int:
         detector_cfgs, default_min_ratio=default_min_ratio, default_device=device
     )
     if not args.dry_run:
-        output.mkdir(parents=True, exist_ok=True)
+        if output.resolve() == DEFAULT_OUTPUT_DIR.resolve():
+            output = build_batch_stage_dir(output)
+        else:
+            output.mkdir(parents=True, exist_ok=True)
+    args.source = source
+    args.output = output
 
     per_kept: dict[str, int] = {d.name: 0 for d in detectors}
     total_removed = total_mosaic = 0
