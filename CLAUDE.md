@@ -1,8 +1,8 @@
-# CJet Vision Pipeline — 项目指令
+# Vision Pipeline — 项目指令
 
 ## 项目一句话
 
-`cjet-vision-pipeline` 是一个**数据生产 + 模型训练**流水线：把补充进来的 PNG 图像自动标注成 LabelMe JSON，做合并、清洗、拆分、YOLO 训练、自标注、归档，最终每日交付一版可训练数据。
+`visionpipline` 是一个**数据生产 + 模型训练**流水线：把补充进来的 PNG 图像自动标注成 LabelMe JSON，做合并、清洗、拆分、YOLO 训练、自标注、归档，最终每日交付一版可训练数据。
 
 完整数据流见 [workflow.md](workflow.md)。
 
@@ -54,7 +54,7 @@
 
 ## 1. 项目一句话
 
-`cjet-vision-pipeline` 是一个 **数据生产 + 模型训练** 流水线：把补充进来的 PNG
+`visionpipline` 是一个 **数据生产 + 模型训练** 流水线：把补充进来的 PNG
 图像自动标注成 LabelMe JSON，做合并、清洗、拆分、YOLO 训练、自标注、归档，
 最终每日交付一版可训练数据。
 
@@ -66,7 +66,7 @@
 
 | 项 | 值 |
 |---|---|
-| 项目根目录 | `d:\PycharmProjects\cjet-vision-pipeline` |
+| 项目根目录 | `d:\PycharmProjects\visionpipline` |
 | Python 解释器 | `.conda\python.exe`（项目自带的便携式 Python，不依赖系统 Python） |
 | 依赖安装 | `.conda\python.exe -m pip install -r requirements.txt` |
 | 工作流入口 | `.conda\python.exe tools\workflow.py --config src\workflow_config.yaml`（当前项目级覆盖在 `src/`；也可 `--config tools\cfg\workflow.yaml` 跑系统主工作流） |
@@ -80,7 +80,7 @@
 ## 3. 目录结构
 
 ```text
-cjet-vision-pipeline/
+visionpipline/
 ├── .conda/                        # 项目自带的便携式 Python 3.11
 ├── datasets/                      # 数据集（raw_jpg / raw / yolo / autolabel / behavior ...）
 ├── runs/                          # yolo detect train 输出
@@ -338,7 +338,7 @@ if __name__ == "__main__" and __package__ in (None, ""):
 
 ## 5. 常用命令速查
 
-> 所有命令都在项目根目录 `d:\PycharmProjects\cjet-vision-pipeline` 下执行。
+> 所有命令都在项目根目录 `d:\PycharmProjects\visionpipline` 下执行。
 
 ### 5.1 安装 / 检查依赖
 

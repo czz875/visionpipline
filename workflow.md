@@ -4,7 +4,7 @@
 筛选 30% → 转 YOLO → 训练 → 自标注 → 回 LabelMe → 再清洗 → 归档」整条链路用
 脚本串起来，实现每日定时交付。
 
-> 本项目位于 `d:\PycharmProjects\cjet-vision-pipeline`，
+> 本项目位于 `d:\PycharmProjects\visionpipline`，
 > Python 环境使用项目自带的便携式解释器 `.conda\python.exe`，
 > 依赖清单见 [requirements.txt](requirements.txt)。
 > 项目结构仿 [ultralytics](https://github.com/ultralytics/ultralytics)：
@@ -286,16 +286,16 @@ OUTPUT_PATH:datasets/01_annotated/auto_annotate_20260721_153022
 
 ```batch
 @echo off
-cd /d D:\PycharmProjects\cjet-vision-pipeline
-D:\PycharmProjects\cjet-vision-pipeline\.conda\python.exe tools\workflow.py --from-stage auto_annotate
+cd /d D:\PycharmProjects\visionpipline
+D:\PycharmProjects\visionpipline\.conda\python.exe tools\workflow.py --from-stage auto_annotate
 ```
 
 以及 `daily_workflow_train.bat`：
 
 ```batch
 @echo off
-cd /d D:\PycharmProjects\cjet-vision-pipeline
-D:\PycharmProjects\cjet-vision-pipeline\.conda\python.exe tools\workflow.py --from-stage select_subset
+cd /d D:\PycharmProjects\visionpipline
+D:\PycharmProjects\visionpipline\.conda\python.exe tools\workflow.py --from-stage select_subset
 ```
 
 然后创建任务：
@@ -307,9 +307,9 @@ D:\PycharmProjects\cjet-vision-pipeline\.conda\python.exe tools\workflow.py --fr
 
 ```cron
 # 上午跑准备阶段
-0 8 * * * cd /path/to/cjet-vision-pipeline && .conda/python tools/workflow.py --from-stage auto_annotate
+0 8 * * * cd /path/to/visionpipline && .conda/python tools/workflow.py --from-stage auto_annotate
 # 下午人工清洗后跑训练阶段
-30 16 * * * cd /path/to/cjet-vision-pipeline && .conda/python tools/workflow.py --from-stage select_subset
+30 16 * * * cd /path/to/visionpipline && .conda/python tools/workflow.py --from-stage select_subset
 ```
 
 ---
