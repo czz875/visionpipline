@@ -99,6 +99,7 @@ DEFAULT_START_BATCHES: tuple[str, ...] = ()  # 通用参数：指定起始 batch
 DEFAULT_DEDUP_EXTS: tuple[str, ...] = (".png", ".jpg", ".jpeg")
 DEFAULT_RECURSIVE = False  # 通用参数：递归扫描 source 子目录下的 PNG
 DEFAULT_NO_CLASSIFY = False  # 通用参数：不按 label 分类，直接平铺进 batch 目录
+DEFAULT_NO_BATCH_STAGE = False  # 通用参数：不包装为 batch_<timestamp> 结构，直接写入 target
 
 # behavior 现有 8 个分类子目录（顺序无业务含义，仅用于建目录时排序）
 CATEGORY_DIRS: tuple[str, ...] = (
@@ -133,8 +134,11 @@ class Pair:
 # =============================================================================
 
 
-def _resolve_group_dirs(source_dir: Path, target_dir: Path) -> tuple[Path, Path]:
+def _resolve_group_dirs(source_dir: Path, target_dir: Path, no_batch_stage: bool = False) -> tuple[Path, Path]:
     """解析当前批次的加密输入与分组输出目录。"""
+    if no_batch_stage:
+        source = resolve_latest_batch_stage_dir(source_dir)
+        return source if source.is_dir() else source_dir, target_dir
     source = resolve_latest_batch_stage_dir(source_dir)
     if not source.is_dir():
         return source, Path(target_dir)
@@ -454,6 +458,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="递归扫描 source 子目录下的 PNG（默认只扫 source 顶层）。适合 source 是含 1_annotated/2_annotated/... 子目录的父目录。",
     )
+    parser.add_argument(
+        "--no-batch-stage",
+        action="store_true",
+        help="不包装为 batch_<timestamp> 结构，直接写入 target 目录。",
+    )
     parser.set_defaults(dry_run=DEFAULT_DRY_RUN, recursive=DEFAULT_RECURSIVE)
     return parser
 
@@ -470,7 +479,7 @@ def main() -> int:
             print(f"[错误] --start-batches 必须是 4 位数字字符串：{b}")
             return 1
 
-    source_dir, target_dir = _resolve_group_dirs(args.source, args.target)
+    source_dir, target_dir = _resolve_group_dirs(args.source, args.target, no_batch_stage=args.no_batch_stage)
 
     try:
         reports = inherit_dataset(
