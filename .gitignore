@@ -47,6 +47,10 @@ venv/
 # ===== 业务无关的本地开发分支 =====
 src/
 docs/
+!docs/
+docs/*
+!docs/command_reference.md
+!docs/project_structure.md
 .worktrees/
 .codebuddy/
 .claude/
