@@ -6,7 +6,7 @@ tools/convert/labelme_to_yolo.py
 - 标签解析与归一化：``tools.core.labelme.labelme_dict_to_detections``（sv.Detections）；
 - 写出 YOLO txt：``supervision.dataset.formats.yolo.detections_to_yolo_annotations``；
 - 写 data.yaml：``supervision.dataset.formats.yolo.save_data_yaml``；
-- 自身只负责：batch 发现、train/val 划分、图片复制、增量跳过。
+- 自身只负责：batch 发现、train/val 划分、图片复制或硬链接、增量跳过。
 
 典型用法：
 
@@ -14,16 +14,24 @@ tools/convert/labelme_to_yolo.py
         --src datasets/behavior ^
         --out datasets/yolo
 
+    # 输出图片改用硬链接以节省空间（源和输出必须位于同一卷）
+    .conda\python.exe tools\convert\labelme_to_yolo.py ^
+        --src datasets/behavior ^
+        --out datasets/yolo ^
+        --hardlink-images
+
     .conda\python.exe tools\convert\labelme_to_yolo.py --help
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import random
 import re
 import shutil
 import sys
+from uuid import uuid4
 from pathlib import Path
 from typing import Iterable
 
@@ -50,6 +58,7 @@ DEFAULT_SPLITS: tuple[str, ...] = ("train", "val")
 DEFAULT_RATIOS: tuple[float, ...] = (0.9, 0.1)
 DEFAULT_SEED = 3407
 DEFAULT_FORCE = False
+DEFAULT_HARDLINK_IMAGES = False
 DEFAULT_IMAGE_SUFFIXES: tuple[str, ...] = (".png", ".jpg", ".jpeg")
 
 # 批次子目录命名：4 位数字（如 0001/、0002/）。不在此格式内的子目录会被忽略。
@@ -157,10 +166,37 @@ def convert_labelme_to_yolo(
     )
 
 
-def copy_image_to_split(image_path: Path, split_name: str, image_dir: Path) -> Path:
+def copy_image_to_split(
+    image_path: Path,
+    split_name: str,
+    image_dir: Path,
+    *,
+    hardlink: bool = DEFAULT_HARDLINK_IMAGES,
+) -> Path:
     dest_path = image_dir / split_name / image_path.name
     dest_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(image_path, dest_path)
+    if not hardlink:
+        if dest_path.exists() and image_path.samefile(dest_path):
+            temp_path = dest_path.with_name(f".{dest_path.name}.{uuid4().hex}.tmp")
+            shutil.copy2(image_path, temp_path)
+            os.replace(temp_path, dest_path)
+            return dest_path
+        shutil.copy2(image_path, dest_path)
+        return dest_path
+
+    if dest_path.exists() and image_path.samefile(dest_path):
+        return dest_path
+
+    temp_path = dest_path.with_name(f".{dest_path.name}.{uuid4().hex}.tmp")
+    try:
+        os.link(image_path, temp_path)
+        os.replace(temp_path, dest_path)
+    except OSError as e:
+        temp_path.unlink(missing_ok=True)
+        raise OSError(
+            f"无法为图片创建硬链接：{image_path} -> {dest_path}。"
+            f"请确认源目录和输出目录位于同一卷。原始错误：{e}"
+        ) from e
     return dest_path
 
 
@@ -194,8 +230,9 @@ def process_batch(
     class_names: list[str],
     splits: tuple[str, ...] = DEFAULT_SPLITS,
     force: bool = DEFAULT_FORCE,
+    hardlink_images: bool = DEFAULT_HARDLINK_IMAGES,
 ) -> None:
-    """处理单个 batch：划分 + 转标签 + 复制图片 + 写 train/val 列表 + 写 data.yaml。
+    """处理单个 batch：划分 + 转标签 + 输出图片 + 写 train/val 列表 + 写 data.yaml。
 
     若目标 label 与 image 均已存在且比源文件新，则默认跳过，以加速增量转换。
     可通过 force=True 强制全部重新转换。
@@ -227,12 +264,21 @@ def process_batch(
                 not force
                 and is_up_to_date(json_path, label_path)
                 and is_up_to_date(image_path, dest_image_path)
+                and (
+                    not hardlink_images
+                    or image_path.samefile(dest_image_path)
+                )
             ):
                 skipped += 1
                 continue
 
             convert_labelme_to_yolo(json_path, label_path, class_names=class_names)
-            copy_image_to_split(image_path, split_name, image_dir)
+            copy_image_to_split(
+                image_path,
+                split_name,
+                image_dir,
+                hardlink=hardlink_images,
+            )
             converted += 1
         write_split_list(out_dir, split_name, split_group)
 
@@ -251,10 +297,12 @@ def convert_to_yolo(
     class_names: list[str],
     seed: int = DEFAULT_SEED,
     force: bool = DEFAULT_FORCE,
+    hardlink_images: bool = DEFAULT_HARDLINK_IMAGES,
     dry_run: bool = False,
 ) -> None:
     """LabelMe → YOLO 的 Python API（与 CLI main() 行为一致）。
 
+    ``hardlink_images=True`` 时以硬链接代替复制图片；默认保持复制行为。
     ``dry_run=True`` 时只 print 计划，不写盘。
     """
     src = src.resolve()
@@ -285,6 +333,7 @@ def convert_to_yolo(
             seed=seed,
             class_names=class_names,
             force=force,
+            hardlink_images=hardlink_images,
         )
 
     # 顶层写一个 names.txt 方便查看
@@ -332,6 +381,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="强制重新转换所有文件，不跳过已存在的输出。",
     )
+    parser.add_argument(
+        "--hardlink-images",
+        action="store_true",
+        default=DEFAULT_HARDLINK_IMAGES,
+        help=(
+            "为输出图片创建硬链接以节省空间（源和输出必须位于同一卷；"
+            "修改任一链接的图片内容会影响另一处）。"
+        ),
+    )
     return parser
 
 
@@ -345,8 +403,9 @@ def main() -> int:
             args.out,
             class_names=class_names,
             force=args.force,
+            hardlink_images=args.hardlink_images,
         )
-    except FileNotFoundError as e:
+    except (FileNotFoundError, OSError) as e:
         print(f"[错误] {e}")
         return 1
     return 0
