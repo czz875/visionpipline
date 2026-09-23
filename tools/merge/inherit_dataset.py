@@ -5,7 +5,7 @@ tools/merge/inherit_dataset.py
 行为：
 - 扫描 ``behavior`` 现有 4 位数字 batch，找最大编号 + 1 作为起点；
 - 把 ``autolabel`` 里所有 (PNG+JSON) 对按 1000/批切分到新 batch；
-- 每个新 batch 内部按 JSON 内 label 归类到 behavior 现有 8 个子目录；
+- 每个新 batch 内部按 JSON 标签和优先级归类到数字子目录；
 - 默认 **复制**（不动 autolabel 原文件），加 ``--move`` 才改为移动；
 - 默认 ``--dry-run``，加 ``--apply`` 才会真复制。
 
@@ -19,17 +19,11 @@ tools/merge/inherit_dataset.py
 - ``--no-classify``：不按 JSON label 分类，直接平铺进 batch 目录，替代
   ``tools/split/into_groups.py`` 的纯按数量分组用途（仅分组、不分类）。
 
-归类规则（与 behavior/0022 现有分布对齐）：
+归类规则：
 
-    仅 face            -> only_face
-    仅 hand            -> only_hand
-    仅 cigarette       -> has_cigarette
-    含 phone           -> has_phone
-    face 数量 >= 2     -> multi_face
-    hand 数量 >= 2     -> multi_hand
-    face + hand 混合   -> multi_hand
-    类别数 >= 3        -> multi_label
-    无 shape           -> other
+    目录映射：0=phone，1=cigarette，2=face，3=hand，4=helmet
+    标签优先级：helmet > cigarette > phone > hand > face
+    全部未命中（包括无 shape）-> other
 
 典型用法：
 
@@ -101,17 +95,23 @@ DEFAULT_RECURSIVE = False  # 通用参数：递归扫描 source 子目录下的 
 DEFAULT_NO_CLASSIFY = False  # 通用参数：不按 label 分类，直接平铺进 batch 目录
 DEFAULT_NO_BATCH_STAGE = False  # 通用参数：不包装为 batch_<timestamp> 结构，直接写入 target
 
-# behavior 现有 8 个分类子目录（顺序无业务含义，仅用于建目录时排序）
-CATEGORY_DIRS: tuple[str, ...] = (
-    "has_cigarette",
-    "has_phone",
-    "multi_face",
-    "multi_hand",
-    "multi_label",
-    "only_hand",
-    "only_face",
-    "other",
+# 分类目录与标签的映射；目录编号不代表分类优先级
+CATEGORY_LABELS: dict[str, str] = {
+    "0": "phone",
+    "1": "cigarette",
+    "2": "face",
+    "3": "hand",
+    "4": "helmet",
+}
+CLASSIFICATION_PRIORITY: tuple[str, ...] = (
+    "helmet",
+    "cigarette",
+    "phone",
+    "hand",
+    "face",
 )
+OTHER_CATEGORY = "other"
+CATEGORY_DIRS: tuple[str, ...] = (*CATEGORY_LABELS, OTHER_CATEGORY)
 
 # 匹配 4 位数字 batch 目录名
 BATCH_DIR_RE = re.compile(r"^\d{4}$")
@@ -197,32 +197,13 @@ def read_labels(json_path: Path) -> list[str]:
 
 
 def classify(labels: list[str]) -> str:
-    """根据 JSON 内的 label 列表，决定该图应归到哪个子目录。
-
-    归类规则见模块 docstring。
-    """
-    if not labels:
-        return "other"
+    """按配置的标签优先级，将图片归入对应数字目录或 ``other``。"""
     label_set = set(labels)
-    counts = Counter(labels)
-
-    if "phone" in label_set:
-        return "has_phone"
-    if label_set == {"cigarette"}:
-        return "has_cigarette"
-    if label_set == {"face"}:
-        return "only_face"
-    if label_set == {"hand"}:
-        return "only_hand"
-    if counts.get("face", 0) >= 2:
-        return "multi_face"
-    if counts.get("hand", 0) >= 2:
-        return "multi_hand"
-    if "face" in label_set and "hand" in label_set:
-        return "multi_hand"
-    if len(label_set) >= 3:
-        return "multi_label"
-    return "other"
+    label_to_category = {label: category for category, label in CATEGORY_LABELS.items()}
+    for label in CLASSIFICATION_PRIORITY:
+        if label in label_set:
+            return label_to_category[label]
+    return OTHER_CATEGORY
 
 
 def chunk_pairs(pairs: list[Pair], batch_size: int) -> list[list[Pair]]:
@@ -401,7 +382,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "把平铺数据集接续到按 batch 组织的目录中。"
-            "按 1000 张/批切分到新 batch 并按 JSON label 归类到子目录。"
+            "按 1000 张/批切分到新 batch，并按数字目录映射和标签优先级归类。"
         ),
     )
     parser.add_argument(
