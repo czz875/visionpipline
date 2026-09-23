@@ -126,7 +126,7 @@ visionpipline/
 **开发流程：**
 
 1. **通用改动一律先在 `main` 分支开发、提交。**
-2. 需要加密工具适配时，进入 worktree，基于最新 `main` 做 `git rebase main`，再提交加密相关改动。
+2. `feat/company-encrypt` 必须始终包含 `main` 的最新提交：开始或继续该分支的工作前，以及每次准备提交加密相关改动前，都先在 `.worktrees/company-encrypt` 确认工作区干净并执行 `git rebase main`；若 `main` 在加密分支开发期间有新提交，提交加密改动前再次同步。rebase 有冲突时先解决并验证，再继续开发或提交。
 3. **不要把通用模块的改动放在 worktree 里再 cherry-pick 回 main**，这会导致两边出现内容相同但 hash 不同的重复提交，历史混乱。
 4. worktree 里只保留该分支专有的内容；若发现通用文件在 worktree 里被改动，应先移回 main 提交，再同步到 worktree。
 
