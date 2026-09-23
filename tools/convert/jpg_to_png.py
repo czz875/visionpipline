@@ -5,8 +5,8 @@ tools/convert/jpg_to_png.py
 典型用法：
 
     .conda\python.exe tools\convert\jpg_to_png.py ^
-        --input E:\czz\0024 ^
-        --output E:\czz\0024\PNG
+        --input datasets\raw_jpg ^
+        --output datasets\raw
 
     .conda\python.exe tools\convert\jpg_to_png.py --help
 """
@@ -33,7 +33,7 @@ from tools.core.labelme import load_labelme, save_labelme  # noqa: E402
 # 1. 默认参数
 # =============================================================================
 
-DEFAULT_INPUT_DIR = r"E:\czz\0024"
+DEFAULT_INPUT_DIR = Path("datasets/raw_jpg")
 DEFAULT_OUTPUT_DIR = Path("datasets/raw")
 DEFAULT_NUM_THREADS = 16
 DEFAULT_PNG_COMPRESSION = 9

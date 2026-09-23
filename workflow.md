@@ -17,7 +17,7 @@
 ```text
 autolabel 平铺数据（可选）
     │
-    ├──► tools/backup/snapshot.py       备份 autolabel + behavior 到 C:\Users\EDY\Pictures
+    ├──► tools/backup/snapshot.py       备份 autolabel + behavior 到 archive/backups
     │
     ▼
 tools/merge/inherit_dataset.py        按 1000 张/批接续到 behavior/0023/...
@@ -179,10 +179,10 @@ JPG 原始数据（可选）──► tools/convert/jpg_to_png.py ──► PNG
 3. **第零段（数据接续）**——补数据时跑：
 
    ```bash
-   # 1) 备份 autolabel + behavior 到 C:\Users\EDY\Pictures
+   # 1) 备份 autolabel + behavior 到 archive/backups
    .conda\python.exe tools\backup\snapshot.py ^
        --sources datasets\autolabel,datasets\behavior ^
-       --output-dir C:\Users\EDY\Pictures ^
+       --output-dir archive\backups ^
        --apply
 
    # 2) autolabel 按 1000/批接续到 behavior/0023/

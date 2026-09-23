@@ -50,3 +50,8 @@ docs/
 .worktrees/
 .codebuddy/
 .claude/
+
+# ===== 本机工具缓存 / 临时数据目录 =====
+Ultralytics/
+.helmet_missing_source/
+.helmet_resume_source/

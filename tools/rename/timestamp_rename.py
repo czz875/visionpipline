@@ -13,16 +13,16 @@ tools/rename/timestamp_rename.py
 
     # 预览
     .conda\python.exe tools\rename\timestamp_rename.py ^
-        --source-dir D:\photos
+        --source-dir datasets\behavior
 
     # 真实执行（递归）
     .conda\python.exe tools\rename\timestamp_rename.py ^
-        --source-dir D:\photos ^
+        --source-dir datasets\behavior ^
         --apply
 
     # 只处理顶层 + 用 ctime
     .conda\python.exe tools\rename\timestamp_rename.py ^
-        --source-dir D:\photos ^
+        --source-dir datasets\behavior ^
         --time-source ctime ^
         --no-recursive ^
         --apply
@@ -51,7 +51,7 @@ if __name__ == "__main__" and __package__ in (None, ""):
 # 1. 默认参数
 # =============================================================================
 
-DEFAULT_SOURCE_DIR = r"D:\photos"
+DEFAULT_SOURCE_DIR = Path("datasets/behavior")
 DEFAULT_TIME_SOURCE = "mtime"           # mtime / ctime
 DEFAULT_RECURSIVE = True
 DEFAULT_DRY_RUN = True

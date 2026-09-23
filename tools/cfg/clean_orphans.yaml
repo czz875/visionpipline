@@ -14,8 +14,8 @@
 # 或用 Python 入口：python src\clean_orphans.py
 
 paths:
-  input_dir: C:\Users\EDY\Desktop\1_annotated          # 输入目录（源）
-  output_dir: C:\Users\EDY\Desktop\1_annotated # 输出目录（与输入相同=原地清理；不同=先复制再清理）
+  input_dir: datasets/01_annotated              # 输入目录（源）
+  output_dir: datasets/01_annotated             # 输出目录（与输入相同=原地清理；不同=先复制再清理）
 
 parameters:
   clean_recursive_flag: "--recursive"       # 递归子目录；不递归则改为 ""

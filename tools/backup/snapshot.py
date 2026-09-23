@@ -12,11 +12,11 @@ tools/backup/snapshot.py
 
     .conda\\python.exe tools\\backup\\snapshot.py ^
         --sources datasets\\autolabel,datasets\\behavior ^
-        --output-dir C:\\Users\\EDY\\Pictures
+        --output-dir archive\\backups
 
     .conda\\python.exe tools\\backup\\snapshot.py ^
         --sources datasets\\autolabel,datasets\\behavior ^
-        --output-dir C:\\Users\\EDY\\Pictures ^
+        --output-dir archive\\backups ^
         --apply
 """
 
@@ -42,7 +42,7 @@ DEFAULT_SOURCES: tuple[str, ...] = (
     r"datasets\autolabel",
     r"datasets\behavior",
 )
-DEFAULT_OUTPUT_DIR = r"C:\Users\EDY\Pictures"
+DEFAULT_OUTPUT_DIR = Path("archive/backups")
 DEFAULT_LEVEL = 6                      # gzip 压缩等级 0-9
 DEFAULT_DRY_RUN = True
 

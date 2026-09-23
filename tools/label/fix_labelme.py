@@ -125,16 +125,26 @@ def _normalize_rectangle(points: object) -> list[list[float]] | None:
 
 
 def _fix_image_path(data: dict, json_path: Path) -> bool:
-    """修复 ``imagePath``，使其指向同目录真实存在的图片。返回是否有改动。"""
-    current = data.get("imagePath", "")
-    candidate = json_path.with_name(current) if current else None
+    """修复 ``imagePath``，使其指向同目录真实存在的图片。返回是否有改动。
+
+    兼容 Linux/Windows 绝对路径：先取 basename 再比对同目录图片，
+    避免 ``Path.with_name`` 遇到带分隔符的旧路径直接抛 ValueError。
+    """
+    current = data.get("imagePath") or ""
+    current_name = Path(str(current).replace("\\", "/")).name if current else ""
+    candidate = json_path.with_name(current_name) if current_name else None
     if candidate is not None and candidate.exists():
+        if data.get("imagePath") != current_name:
+            data["imagePath"] = current_name
+            return True
         return False
     real = find_image_for_json(json_path)
     if real is None:
         return False
-    data["imagePath"] = real.name
-    return True
+    if data.get("imagePath") != real.name:
+        data["imagePath"] = real.name
+        return True
+    return False
 
 
 def _fix_image_size(data: dict, image_path: Path) -> bool:

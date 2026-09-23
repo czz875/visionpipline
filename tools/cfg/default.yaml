@@ -13,7 +13,7 @@ paths:
   raw_data: datasets/raw
   ir_aug: datasets/raw_ir_aug
   autolabel: datasets/autolabel
-  backup_dir: C:/Users/EDY/Pictures
+  backup_dir: archive/backups
   behavior: datasets/behavior
   annotated: datasets/01_annotated
   cleaned: datasets/01_annotated

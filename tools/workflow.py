@@ -66,6 +66,17 @@ if _conda_dir is not None and sys.platform == "win32":
         if p not in os.environ.get("PATH", "").split(os.pathsep):
             os.environ["PATH"] = p + os.pathsep + os.environ.get("PATH", "")
 
+# Windows 中文环境下 Python 子进程默认用 GBK 输出 stdout；tqdm / ultralytics 的
+# 进度条字符（█ ▉ ▊ 等）在 GBK 里不存在，父子进程任一编码错配都会 UnicodeDecodeError。
+# 这里把 PYTHONIOENCODING 强制设为 utf-8，让所有 stage 子进程统一用 UTF-8 输出。
+if sys.platform == "win32":
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+
+# 子进程 stdout/stderr 解码配置：UTF-8 + 宽容替换，避免任何残留非 UTF-8 字节炸掉
+# 整个工作流。放在文件顶部，两处 subprocess.Popen 统一引用。
+_SUBPROC_ENCODING = "utf-8"
+_SUBPROC_ERRORS = "replace"
+
 
 # =============================================================================
 # 1. 默认参数
@@ -150,6 +161,8 @@ def run_stage(
         stdout=subprocess.PIPE,
         stderr=None,
         text=True,
+        encoding=_SUBPROC_ENCODING,
+        errors=_SUBPROC_ERRORS,
         bufsize=1,
     )
     stdout_lines: list[str] = []
@@ -234,6 +247,8 @@ def run_group(
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
+                    encoding=_SUBPROC_ENCODING,
+                    errors=_SUBPROC_ERRORS,
                 ),
             )
         )

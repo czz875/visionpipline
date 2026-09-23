@@ -10,7 +10,7 @@
 #   python tools/workflow.py --config tools/cfg/hand_face_mosaic.yaml
 #
 # 逻辑（检测 → 合并 → 打码，三步串行）：
-#   1、备份 datasets/1,2,3 到 ${paths.backup_dir}（默认 C:/Users/EDY/Pictures），
+#   1、备份 datasets/1,2,3 到 ${paths.backup_dir}（默认 archive/backups），
 #      三个目录各生成一个带时间戳的 .tar.gz；
 #   2、datasets/phone2 跑一次 ONNX + SAM 两路「只检测」（order 2，--no-blackout）：
 #        ONNX 标 face（yolov5s-lmk.onnx）+ SAM 文本 prompt 标 hand/phone/cigarette，
@@ -56,7 +56,7 @@ stages:
     order: 2
     command: >
       python tools/annotate/auto.py --model-type onnx
-      --source E:\czz\0715_03 --output E:\czz\0715_03_annotated
+      --source datasets/phone2 --output datasets/phone2_annotated
       --onnx-model weight/yolov5s-lmk.onnx --onnx-label face
       --sam-model weight/sam3.1_multiplex.pt --sam-prompt hand,phone,cigarette --sam-label hand,phone,cigarette
       --onnx-min-ratio 0.01 --sam-min-ratio 0.01 --mosaic-block 16
