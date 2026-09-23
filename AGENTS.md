@@ -412,6 +412,13 @@ if __name__ == "__main__" and __package__ in (None, ""):
     --out datasets\yolo ^
     --classes phone,cigarette,face,hand ^
     --ratios 0.9,0.1
+
+# 输出图片使用硬链接以减少重复存储；源目录和输出目录必须位于同一卷
+.conda\python.exe tools\convert\labelme_to_yolo.py ^
+    --src datasets\behavior ^
+    --out datasets\yolo ^
+    --classes phone,cigarette,face,hand ^
+    --hardlink-images
 ```
 
 ### 5.3 跑整个工作流
