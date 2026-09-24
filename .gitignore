@@ -49,6 +49,8 @@ src/
 docs/
 !docs/
 docs/*
+!docs/AGENTS.md
+!docs/CLAUDE.md
 .worktrees/
 .codebuddy/
 .claude/

@@ -2,7 +2,8 @@
 
 本文件只保留 AI 助手在仓库中必须遵守的规则。开发流程、代码风格、验证命令和
 Git 规范见 [CONTRIBUTING.md](CONTRIBUTING.md)；项目概览见 [README.md](README.md)，
-数据流水线说明见 [workflow.md](workflow.md)。
+数据流水线说明见 [workflow.md](workflow.md)。`docs/AGENTS.md` 补充约束 `docs/` 下的文档；
+`docs/CLAUDE.md` 是指向它的符号链接。
 
 ## 项目约定
 

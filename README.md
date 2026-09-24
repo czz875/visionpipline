@@ -213,6 +213,7 @@ visionpipline/
 - [workflow.md](workflow.md) — 整体链路、工作流配置、阶段运行与定时交付
 - [CONTRIBUTING.md](CONTRIBUTING.md) — 开发流程、代码风格、验证命令、Markdown 与 Git 规范
 - [AGENTS.md](AGENTS.md) — AI 助手执行任务时必须遵守的项目规则
+- [docs/AGENTS.md](docs/AGENTS.md) — `docs/` 目录专用的文档规则
 - [tools/cfg/](tools/cfg/) — 工作流配置与任务专项模板
 
 ---
