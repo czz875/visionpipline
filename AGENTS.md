@@ -323,12 +323,12 @@ if __name__ == "__main__" and __package__ in (None, ""):
 
 ### 8.2 Commit message 格式
 
-遵循 [Conventional Commits](https://www.conventionalcommits.org/)，**标题与正文都用简体中文**：
+遵循 [Conventional Commits](https://www.conventionalcommits.org/)：标题和正文均用简体中文；scope 可省略，标题不超过 50 个字符，正文必须填写。合并提交统一使用 `merge:` 类型。
 
 ```text
-<type>(<scope>): <中文一句话标题，不超过 50 字>
+<type>(<scope 可选>): <中文一句话标题，不超过 50 字>
 
-<正文段落，72 字换行，说明 "为什么" 而不是 "做了什么">
+<正文说明目的或原因，建议按 72 字换行>
 - 改动点 1
 - 改动点 2
 ```
@@ -345,6 +345,7 @@ if __name__ == "__main__" and __package__ in (None, ""):
 | `test` | 测试相关 |
 | `chore` | 杂项（依赖、.gitignore、目录结构微调） |
 | `style` | 格式调整（不影响逻辑） |
+| `merge` | 合并分支 |
 
 示例：
 
