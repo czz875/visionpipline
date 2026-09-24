@@ -4,7 +4,8 @@
 
 项目结构仿 [ultralytics](https://github.com/ultralytics/ultralytics)：业务脚本按阶段分组放在 `tools/<stage>/`，YAML 配置集中在 `tools/cfg/`，由 `tools/workflow.py` 统一编排。
 
-> 详细文档见 [workflow.md](workflow.md)（数据流与快速开始）与 [AGENTS.md](AGENTS.md)（目录结构、开发约定、常用命令）。
+> 开始使用见下方快速开始；开发规范见 [CONTRIBUTING.md](CONTRIBUTING.md)，
+> AI 助手规则见 [AGENTS.md](AGENTS.md)，流水线说明见 [workflow.md](workflow.md)。
 
 ---
 
@@ -143,6 +144,17 @@ visionpipline/
 .conda\python.exe tools\annotate\auto.py --detectors-config src\detectors.yaml
 ```
 
+**LabelMe 转 YOLO（可选硬链接复用图片）：**
+
+```powershell
+.conda\python.exe tools\convert\labelme_to_yolo.py `
+    --src datasets\behavior `
+    --out datasets\yolo `
+    --hardlink-images
+```
+
+硬链接可减少重复图片占用，源目录和输出目录必须位于同一磁盘卷；默认不启用。
+
 **跑整条工作流：**
 
 ```bash
@@ -162,7 +174,7 @@ visionpipline/
 .conda\python.exe -m pytest tests\ -q
 ```
 
-更多命令见 [AGENTS.md](AGENTS.md) 第 5 节。
+开发与验证约定见 [CONTRIBUTING.md](CONTRIBUTING.md)；工作流参数和专项配置见 [workflow.md](workflow.md)。
 
 ---
 
@@ -198,8 +210,9 @@ visionpipline/
 
 ## 文档
 
-- [workflow.md](workflow.md) — 整体链路、核心脚本表、三段式工作流快速开始、定时交付配置
-- [AGENTS.md](AGENTS.md) — 目录结构、开发约定（语言规范 / 路径保护 / 官方库优先）、常用命令速查
+- [workflow.md](workflow.md) — 整体链路、工作流配置、阶段运行与定时交付
+- [CONTRIBUTING.md](CONTRIBUTING.md) — 开发流程、代码风格、验证命令、Markdown 与 Git 规范
+- [AGENTS.md](AGENTS.md) — AI 助手执行任务时必须遵守的项目规则
 - [tools/cfg/](tools/cfg/) — 工作流配置与任务专项模板
 
 ---
