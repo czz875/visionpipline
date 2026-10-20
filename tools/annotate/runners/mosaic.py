@@ -47,7 +47,8 @@ def run_mosaic(args) -> int:
 
     total_kept = total_removed = total_mosaic = 0
     for image_path in tqdm(images, desc="打码中", unit="img"):
-        image = cv2.imread(str(image_path))
+        # 通过字节读写兼容 Windows 中文路径，避免 OpenCV 按本地编码解析文件名。
+        image = cv2.imdecode(np.fromfile(image_path, dtype=np.uint8), cv2.IMREAD_COLOR)
         if image is None:
             print(f"[警告] 无法读取图片，跳过：{image_path}", file=sys.stderr)
             continue
@@ -84,7 +85,10 @@ def run_mosaic(args) -> int:
         total_mosaic += n
         if not args.dry_run:
             data = rewrite_labelme_dict(json_path, boxes, labels, image.shape, image_path.name)
-            cv2.imwrite(str(image_path), image)
+            success, encoded = cv2.imencode(image_path.suffix, image)
+            if not success:
+                raise OSError(f"图片编码失败：{image_path}")
+            encoded.tofile(image_path)
             save_labelme(data, json_path)
 
     mode = "预览" if args.dry_run else "完成"
