@@ -75,6 +75,7 @@ if __name__ == "__main__" and __package__ in (None, ""):
 
 from tools.core import (
     build_related_batch_stage_dir,
+    list_images,
     resolve_latest_batch_stage_dir,
 )
 
@@ -158,24 +159,16 @@ def discover_max_batch(target_dir: Path) -> int:
 
 
 def collect_pairs(source_dir: Path, recursive: bool = DEFAULT_RECURSIVE) -> list[Pair]:
-    """扫描 ``source_dir`` 下的 PNG+JSON 配对（按文件名排序）。
+    """扫描 ``source_dir`` 下的图片与 JSON 配对（按路径排序）。
 
-    默认只扫顶层 ``*.png``（非递归）；``recursive=True`` 时递归 ``rglob`` 所有
-    子目录的 PNG（适合 source 是含 ``1_annotated/2_annotated/...`` 子目录的父目录）。
+    复用项目支持的图片扩展名，包含 PNG、JPG 等；默认只扫顶层，
+    ``recursive=True`` 时递归所有子目录。
     """
-    if recursive:
-        pngs = sorted(source_dir.rglob("*.png"))
-    else:
-        pngs = sorted(source_dir.glob("*.png"))
-    pairs: list[Pair] = []
-    for png in pngs:
-        json_path = png.with_suffix(".json")
-        if not json_path.exists():
-            # PNG 没有配对 JSON 的情况：单独打包
-            pairs.append(Pair(image=png, json=json_path))
-            continue
-        pairs.append(Pair(image=png, json=json_path))
-    return pairs
+    # 保留原行为：缺少 JSON 的图片也进入计划，由后续步骤处理。
+    return [
+        Pair(image=image, json=image.with_suffix(".json"))
+        for image in list_images(source_dir, recursive=recursive)
+    ]
 
 
 def read_labels(json_path: Path) -> list[str]:

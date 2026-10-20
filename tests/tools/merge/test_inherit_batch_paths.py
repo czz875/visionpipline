@@ -6,6 +6,21 @@ from pathlib import Path
 from tools.merge import inherit_dataset
 
 
+def test_grouping_preserves_png_and_jpg_pairs(tmp_path):
+    """非 PNG 图片同样进入分组，不能在已标注后静默丢失。"""
+    source = tmp_path / "source"
+    source.mkdir()
+    for name in ("a.png", "b.jpg", "c.JPEG"):
+        (source / name).write_bytes(b"image")
+        (source / name).with_suffix(".json").write_text('{"shapes": []}', encoding="utf-8")
+    target = tmp_path / "grouped"
+    reports = inherit_dataset.inherit_dataset(source, target, dry_run=False, no_classify=True)
+    assert sum(r["total"] for r in reports) == 3
+    assert {p.name for p in (target / "0001").iterdir()} == {
+        "a.png", "a.json", "b.jpg", "b.json", "c.JPEG", "c.json",
+    }
+
+
 def test_resolve_group_dirs_uses_same_batch(tmp_path: Path) -> None:
     """逻辑输入应解析到最新批次，并在同批次创建分组目录。"""
     encrypted_dir = tmp_path / "batch_20260729_120000" / "02_encrypted"
