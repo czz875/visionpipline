@@ -184,6 +184,41 @@ def _build_detectors(
 
 
 # =============================================================================
+# 打码策略解析
+# =============================================================================
+
+
+def resolve_use_mosaic(cfg: dict, args) -> bool:
+    """解析打码策略，返回 ``True`` 表示马赛克、``False`` 表示纯黑。
+
+    优先级：CLI 显式开关 > YAML ``blackout`` > 默认马赛克。
+
+    原实现只读 YAML，忽略 CLI：用户显式要求 ``--blackout``（不可逆遮挡）却拿到
+    马赛克，且没有任何提示。CLI 是本次调用的直接意图，应当优先于配置文件。
+
+    Args:
+        cfg: detectors YAML 内容。
+        args: argparse 结果，需含 ``blackout`` 与 ``mosaic``。
+
+    Returns:
+        ``True`` 用马赛克，``False`` 用纯黑。
+
+    Raises:
+        ValueError: ``--blackout`` 与 ``--mosaic`` 同时指定（矛盾输入）。
+    """
+    cli_blackout = bool(getattr(args, "blackout", False))
+    cli_mosaic = bool(getattr(args, "mosaic", False))
+    if cli_blackout and cli_mosaic:
+        raise ValueError("--blackout 与 --mosaic 不能同时指定")
+    if cli_blackout:
+        return False
+    if cli_mosaic:
+        return True
+    # CLI 未显式指定：沿用 YAML，未写则默认马赛克。
+    return not bool(cfg.get("blackout", False))
+
+
+# =============================================================================
 # 入口
 # =============================================================================
 
@@ -208,11 +243,15 @@ def run_multi(args) -> int:
         print("[错误] 配置里 detectors 为空。", file=sys.stderr)
         return 1
 
-    # 全局项：优先取 YAML，其次回退到 CLI 默认。
+    # 全局项：CLI 显式指定的打码策略优先于 YAML，其余项优先取 YAML。
     source = Path(cfg.get("source") or args.source)
     output = Path(cfg.get("output") or args.output or DEFAULT_OUTPUT_DIR)
     recursive = bool(cfg.get("recursive", args.recursive))
-    use_mosaic = not bool(cfg.get("blackout", False))  # 默认马赛克，blackout: true 用纯黑
+    try:
+        use_mosaic = resolve_use_mosaic(cfg, args)
+    except ValueError as e:
+        print(f"[错误] {e}", file=sys.stderr)
+        return 1
     mosaic_block = int(cfg.get("mosaic_block", args.mosaic_block))
     default_min_ratio = float(cfg.get("min_ratio", args.onnx_min_ratio))
     device = cfg.get("device", args.device) or None

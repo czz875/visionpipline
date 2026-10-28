@@ -22,6 +22,7 @@ from tools.annotate.backends import (
 )
 from tools.core import (
     IMAGE_EXTENSIONS as IMG_EXTS,
+    build_batch_stage_dir,
     detections_to_labelme_dict,
     list_images,
     read_image,
@@ -260,6 +261,26 @@ def _rewrite_yolo_data_yaml(output: Path, class_names: list[str]) -> None:
     (output / "data.yaml").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def resolve_supervision_output(logical_output: Path) -> Path:
+    """把逻辑输出目录解析为批次内的实际目录。
+
+    其它 runner（onnx / multi）都把结果写进 ``batch_<时间戳>/<阶段名>``，
+    而 supervision 原先直接写逻辑目录。``merge.py`` 的
+    ``resolve_latest_batch_stage_dir`` 会解析到「父目录下最新的 batch_*」，
+    于是合并的是**历史批次**、新标注整个被跳过，且照常报告成功。
+
+    这里统一落批次目录，与其它 runner 保持一致。
+
+    Args:
+        logical_output: 逻辑输出目录，如 ``datasets/01_annotated``。
+
+    Returns:
+        批次内的阶段目录，如 ``datasets/batch_<时间戳>/01_annotated``。
+    """
+    logical = Path(logical_output)
+    return build_batch_stage_dir(logical)
+
+
 def _check_yolo_basename_collisions(dataset) -> None:
     """检测 YOLO 导出会发生的同名覆盖。
 
@@ -403,9 +424,11 @@ def run_supervision(args) -> int:
     if len(dataset) == 0:
         print("[错误] 所有图片推理失败，未产出任何标注。", file=sys.stderr)
         return 1
+    output = resolve_supervision_output(Path(args.output))
+    args.output = output
     export_detection_dataset(
         dataset,
-        Path(args.output),
+        output,
         args.format,
         args.copy_images,
     )
