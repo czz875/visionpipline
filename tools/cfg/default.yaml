@@ -44,6 +44,6 @@ parameters:
   ir_aug_local_classes: "all"
   inherit_batch_size: 1000
   snapshot_level: 6
-  yolo_classes: "phone,cigarette,face,hand"
+  yolo_classes: "phone,cigarette,face,hand,helmet"
 
 log_file: workflow.log

@@ -69,7 +69,7 @@ parameters:
   ir_aug_local_classes: "all"
   inherit_batch_size: 1000
   snapshot_level: 6
-  yolo_classes: "phone,cigarette,face,hand"
+  yolo_classes: "phone,cigarette,face,hand,helmet"
 
 stages:
   # ---------- 第 1 批：数据接续（备份 + autolabel 接续 + JSON 修复 + 重命名） ----------

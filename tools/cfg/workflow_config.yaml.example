@@ -44,7 +44,7 @@ paths:
 #   blurry_threshold: 0.185
 #   high_quality_ratio: 0.3
 #   yolo_epochs: 100
-#   yolo_classes: "phone,cigarette,face,hand"
+#   yolo_classes: "phone,cigarette,face,hand,helmet"
 #   inherit_batch_size: 1000
 #   snapshot_level: 6
 

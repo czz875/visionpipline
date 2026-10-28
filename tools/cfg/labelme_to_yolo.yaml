@@ -4,13 +4,16 @@
 # 用法：
 #   python tools/workflow.py --config tools/cfg/labelme_to_yolo.yaml --dry-run
 #   python tools/workflow.py --config tools/cfg/labelme_to_yolo.yaml
+#
+# 类别表只有一处权威定义：tools/cfg/default.yaml 的 parameters.yolo_classes。
+# 需要改用其它类别时，在自己的项目配置（src/workflow_config.yaml）里覆盖即可，
+# 不要在本文件重复写一份，避免两处各自演进后偏离。
 
 paths:
   behavior: datasets/behavior
   yolo: datasets/yolo
 
 parameters:
-  yolo_classes: "phone,cigarette,face,hand"
   ratios: 0.9,0.1
   seed: 3407
 
