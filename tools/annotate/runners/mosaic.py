@@ -63,7 +63,16 @@ def run_mosaic(args) -> int:
         json_path = find_json_for_image(image_path)
         if not json_path or not json_path.exists():
             continue
-        data = load_labelme(json_path)
+        try:
+            data = load_labelme(json_path)
+        except (ValueError, OSError) as e:
+            # 坏 JSON（语法错误、被截断）不该中断整批，也不该被覆盖成合法 JSON。
+            print(
+                f"[警告] 无法解析标注，跳过该图：{json_path}（{type(e).__name__}: {e}）",
+                file=sys.stderr,
+            )
+            failed.append(image_path)
+            continue
         # 按标签分组收集矩形框
         by_label: dict[str, list] = {}
         for shape in data.get("shapes", []):

@@ -174,6 +174,7 @@ def run_onnx(args) -> int:
         return srcs
 
     total_onnx = total_sam = total_removed = total_mosaic = 0
+    failures: list[Path] = []
     for _path, sources, _boxes, _labels, n in iter_annotated_images(
         images,
         _onnx_build_sources,
@@ -182,6 +183,7 @@ def run_onnx(args) -> int:
         dry_run=args.dry_run,
         output=output,
         source=source,
+        failures=failures,
     ):
         total_onnx += len(sources[0].kept)
         total_sam += (len(sources[1].kept) if len(sources) > 1 else 0)
@@ -202,4 +204,12 @@ def run_onnx(args) -> int:
         print(f"[{mode}] 输出目录：{output}")
     else:
         print("[提示] 当前为预览模式，未写盘；确认无误请加 --apply。")
+    if failures:
+        print(
+            f"[警告] {len(failures)} 张图片处理失败，已跳过："
+            f"{', '.join(p.name for p in failures[:5])}"
+            + (" ..." if len(failures) > 5 else ""),
+            file=sys.stderr,
+        )
+        return 1
     return 0

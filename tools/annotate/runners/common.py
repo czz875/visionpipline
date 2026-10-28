@@ -132,6 +132,10 @@ def write_annotation_result(
 
     ``output`` 为 ``None`` 时不写盘（调用方负责处理覆盖模式等的原地写盘）。
     传入 ``source`` 时，会在输出目录下保留相对于 source 的子目录结构。
+
+    Raises:
+        OSError: 图片写盘失败。此时**不写** JSON，避免留下「有 JSON 无图」
+            的脏数据；由调用方决定是否跳过该图继续。
     """
     if output is None:
         return
@@ -159,6 +163,7 @@ def iter_annotated_images(
     dry_run: bool,
     output: Path | None,
     source: Path | None = None,
+    failures: list[Path] | None = None,
 ):
     """通用标注循环：推理建源 -> 多源打码合并 -> 写盘，逐张 yield 统计要素。
 
@@ -166,13 +171,28 @@ def iter_annotated_images(
     ``BoxSource`` 列表（ONNX 一路、SAM 第二路、多检测器组合的差异都封在这里）。
     循环主体因此在所有「标注模式」间复用，避免重复遍历/写盘逻辑。
     每个元素 yield ``(image_path, sources, boxes, labels, blackout_count)``。
+
+    单张图读取、推理或写盘失败时跳过该图继续，不中断整批：磁盘满、路径过长、
+    文件被占用都可能让写盘抛 OSError，一张图失败不该让整批已处理的结果白跑。
+    失败路径追加到调用方传入的 ``failures`` 列表，调用方可据此决定返回码。
     """
+    if failures is None:
+        failures = []
     for image_path in tqdm(image_paths, desc="标注中", unit="img"):
         image = read_image(image_path)
         if image is None:
             print(f"[警告] 无法读取图片，跳过：{image_path}", file=sys.stderr)
+            failures.append(image_path)
             continue
-        sources = build_sources(image, image_path)
+        try:
+            sources = build_sources(image, image_path)
+        except Exception as e:  # 单图推理失败不该终止整批
+            print(
+                f"[警告] 推理失败，跳过该图：{image_path}（{type(e).__name__}: {e}）",
+                file=sys.stderr,
+            )
+            failures.append(image_path)
+            continue
         image, boxes, labels, n = run_multi_source_annotation(
             image,
             sources,
@@ -181,10 +201,15 @@ def iter_annotated_images(
             dry_run=dry_run,
         )
         if not dry_run:
-            write_annotation_result(
-                image, image_path, image_path.name, boxes, labels, output,
-                source=source,
-            )
+            try:
+                write_annotation_result(
+                    image, image_path, image_path.name, boxes, labels, output,
+                    source=source,
+                )
+            except OSError as e:
+                print(f"[警告] 写盘失败，跳过该图：{e}", file=sys.stderr)
+                failures.append(image_path)
+                continue
         yield image_path, sources, boxes, labels, n
 
 
