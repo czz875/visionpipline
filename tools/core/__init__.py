@@ -21,6 +21,7 @@ from tools.core.geometry import (
     xyxy_to_points,
 )
 from tools.core.copy_dataset import copy_dataset
+from tools.core.image_io import image_size, read_image, write_image
 from tools.core.images import list_images
 from tools.core.output_dir import (
     build_batch_stage_dir,
@@ -50,15 +51,18 @@ __all__ = [
     "find_image_for_json",
     "find_json_for_image",
     "get_boxes_dist",
+    "image_size",
     "labelme_dict_to_detections",
     "copy_dataset",
     "list_images",
     "list_labelme_files",
     "load_labelme",
     "merge_near_boxes",
+    "read_image",
     "rect_to_xyxy",
     "resolve_latest_batch_stage_dir",
     "save_labelme",
     "unregistered_labels",
+    "write_image",
     "xyxy_to_points",
 ]

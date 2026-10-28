@@ -8,12 +8,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import cv2
 import numpy as np
 import sys
 from tqdm import tqdm
 
-from tools.core import find_json_for_image, list_images, load_labelme, rect_to_xyxy, save_labelme
+from tools.core import (
+    find_json_for_image,
+    list_images,
+    load_labelme,
+    read_image,
+    rect_to_xyxy,
+    save_labelme,
+    write_image,
+)
 from tools.annotate.ops import rewrite_labelme_dict
 from tools.annotate.runners.common import (
     BoxSource,
@@ -46,11 +53,12 @@ def run_mosaic(args) -> int:
         mosaic_label_set = {s.strip() for s in args.mosaic_labels.split(",") if s.strip()}
 
     total_kept = total_removed = total_mosaic = 0
+    failed: list[Path] = []
     for image_path in tqdm(images, desc="打码中", unit="img"):
-        # 通过字节读写兼容 Windows 中文路径，避免 OpenCV 按本地编码解析文件名。
-        image = cv2.imdecode(np.fromfile(image_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+        image = read_image(image_path)
         if image is None:
             print(f"[警告] 无法读取图片，跳过：{image_path}", file=sys.stderr)
+            failed.append(image_path)
             continue
         json_path = find_json_for_image(image_path)
         if not json_path or not json_path.exists():
@@ -85,10 +93,12 @@ def run_mosaic(args) -> int:
         total_mosaic += n
         if not args.dry_run:
             data = rewrite_labelme_dict(json_path, boxes, labels, image.shape, image_path.name)
-            success, encoded = cv2.imencode(image_path.suffix, image)
-            if not success:
-                raise OSError(f"图片编码失败：{image_path}")
-            encoded.tofile(image_path)
+            try:
+                write_image(image_path, image)
+            except OSError as e:
+                print(f"[警告] 图片写盘失败，跳过该图：{e}", file=sys.stderr)
+                failed.append(image_path)
+                continue
             save_labelme(data, json_path)
 
     mode = "预览" if args.dry_run else "完成"
@@ -99,6 +109,13 @@ def run_mosaic(args) -> int:
         f"[{mode}] 实际打码区域：{total_mosaic}"
         f"（重叠被保护跳过：{total_removed - total_mosaic}）"
     )
+    if failed:
+        print(
+            f"[警告] {len(failed)} 张图片处理失败，已跳过："
+            f"{', '.join(p.name for p in failed[:5])}"
+            + (" ..." if len(failed) > 5 else ""),
+            file=sys.stderr,
+        )
     if args.dry_run:
         print("[提示] 当前为预览模式，未写盘；确认无误请加 --apply。")
-    return 0
+    return 1 if failed else 0

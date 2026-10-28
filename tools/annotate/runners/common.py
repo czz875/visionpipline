@@ -1,5 +1,5 @@
 """
-tools/annotate/runners/_common.py
+tools/annotate/runners/common.py
 
 标注 runner 的公共基础设施：BoxSource 数据类、多源合并打码、通用标注循环、
 批量文件发现等。被 onnx / mosaic / multi 等 runner 复用。
@@ -13,15 +13,15 @@ from typing import Callable
 
 import sys
 
-import cv2
 import numpy as np
 from tqdm import tqdm
 
 from tools.core import (
-    find_json_for_image,
     list_images,
     load_labelme,
+    read_image,
     save_labelme,
+    write_image,
 )
 from tools.annotate.ops import (
     apply_blackout,
@@ -145,7 +145,7 @@ def write_annotation_result(
         out_img = output / image_path.name
     out_img.parent.mkdir(parents=True, exist_ok=True)
     out_json = out_img.with_suffix(".json")
-    cv2.imwrite(str(out_img), image)
+    write_image(out_img, image)
     data = rewrite_labelme_dict(out_json, boxes, labels, image.shape, image_name)
     save_labelme(data, out_json)
 
@@ -168,7 +168,7 @@ def iter_annotated_images(
     每个元素 yield ``(image_path, sources, boxes, labels, blackout_count)``。
     """
     for image_path in tqdm(image_paths, desc="标注中", unit="img"):
-        image = cv2.imread(str(image_path))
+        image = read_image(image_path)
         if image is None:
             print(f"[警告] 无法读取图片，跳过：{image_path}", file=sys.stderr)
             continue

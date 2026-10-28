@@ -24,6 +24,7 @@ from tools.core import (
     IMAGE_EXTENSIONS as IMG_EXTS,
     detections_to_labelme_dict,
     list_images,
+    read_image,
     save_labelme,
 )
 from tools.annotate.defaults import (
@@ -34,20 +35,31 @@ from tools.annotate.defaults import (
 
 
 def parse_class_ids(
-    arg: str | None, model_names: dict[int, str]
+    arg: str | None, model_names: dict[int, str] | list[str]
 ) -> set[int] | None:
     """将 ``--classes`` 字符串解析为类别 ID 集合。
 
     支持 ``0,2,3`` 与 ``person,car`` 两种形式；未知名称打印警告但不中断。
-    返回 ``None`` 表示不过滤。
+
+    Args:
+        arg: ``--classes`` 参数原文。
+        model_names: 类别映射。既接受 ``{id: name}``（模型自带 ``names``），
+            也接受 ``list[str]``（各后端 ``AutoLabeler.classes`` 的形态）。
+
+    Returns:
+        类别 ID 集合；``None`` 表示不过滤。
     """
     if not arg:
         return None
     items = [s.strip() for s in arg.split(",") if s.strip()]
     if not items:
         return None
+    if isinstance(model_names, dict):
+        pairs = list(model_names.items())
+    else:
+        pairs = list(enumerate(model_names))
     ids: set[int] = set()
-    name_to_id = {name.lower(): idx for idx, name in model_names.items()}
+    name_to_id = {str(name).lower(): int(idx) for idx, name in pairs}
     for it in items:
         if it.isdigit():
             ids.add(int(it))
@@ -137,9 +149,8 @@ def _export_labelme(dataset, output_dir: Path) -> None:
     ``save_labelme`` 自行写出矩形框，不依赖缺失的官方接口。不同子目录的
     同名图片通过 ``_unique_stem`` 去重。
     """
-    import cv2
-
     used_stems: set[str] = set()
+    skipped = 0
     for image_path, image, detections in dataset:
         src = Path(image_path)
         stem = _unique_stem(src, used_stems)
@@ -150,8 +161,15 @@ def _export_labelme(dataset, output_dir: Path) -> None:
         if image is not None and getattr(image, "shape", None) is not None:
             height, width = image.shape[:2]
         else:
-            loaded = cv2.imread(str(src))
-            height, width = (loaded.shape[:2] if loaded is not None else (0, 0))
+            loaded = read_image(src)
+            if loaded is None:
+                print(
+                    f"[警告] 无法读取图片尺寸，跳过该图：{src}",
+                    file=sys.stderr,
+                )
+                skipped += 1
+                continue
+            height, width = loaded.shape[:2]
 
         # 将框夹回图像范围内，避免 SAM 给出轻微越界的负坐标。
         if width > 0 and height > 0 and len(detections) > 0:
@@ -170,6 +188,12 @@ def _export_labelme(dataset, output_dir: Path) -> None:
             image_height=height,
         )
         save_labelme(data, dst.with_suffix(".json"))
+
+    if skipped:
+        print(
+            f"[警告] {skipped} 张图片无法读取尺寸，未导出对应 JSON。",
+            file=sys.stderr,
+        )
 
 
 def export_detection_dataset(

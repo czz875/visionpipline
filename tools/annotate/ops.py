@@ -231,23 +231,41 @@ def extract_existing_label_boxes(json_path: Path, label: str) -> np.ndarray:
     """从现有 LabelMe JSON 中提取指定标签的矩形框。"""
     if not json_path.exists():
         return np.empty((0, 4), dtype=np.float32)
-    data = load_labelme(json_path)
-    boxes: list[list[float]] = []
+    return group_rect_boxes_by_label(load_labelme(json_path)).get(
+        label, np.empty((0, 4), dtype=np.float32)
+    )
+
+
+def group_rect_boxes_by_label(data: dict) -> dict[str, np.ndarray]:
+    """把已读入的 LabelMe dict 按标签分组为矩形框数组。
+
+    覆盖模式需要按类别分别取框；一次读 JSON、一次遍历即可得到全部类别，
+    避免「每个类别重新解析同一个文件」的 IO 放大。
+
+    Args:
+        data: ``load_labelme`` 读出的字典。
+
+    Returns:
+        ``{label: ndarray(N, 4)}``；没有矩形框的标签不出现在结果中。
+    """
+    grouped: dict[str, list[list[float]]] = {}
     for shape in data.get("shapes", []):
-        if shape.get("label") != label:
-            continue
         if shape.get("shape_type") != "rectangle":
+            continue
+        label = shape.get("label", "")
+        if not label:
             continue
         points = shape.get("points", [])
         if len(points) < 2:
             continue
         (x1, y1), (x2, y2) = points[:2]
-        boxes.append([
+        grouped.setdefault(label, []).append([
             float(min(x1, x2)),
             float(min(y1, y2)),
             float(max(x1, x2)),
             float(max(y1, y2)),
         ])
-    if not boxes:
-        return np.empty((0, 4), dtype=np.float32)
-    return np.array(boxes, dtype=np.float32)
+    return {
+        label: np.array(boxes, dtype=np.float32)
+        for label, boxes in grouped.items()
+    }

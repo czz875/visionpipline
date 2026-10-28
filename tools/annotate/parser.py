@@ -71,11 +71,11 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"模型路径或名称；YOLO 默认 {DEFAULT_YOLO_MODEL}，SAM3 默认 {DEFAULT_SAM3_MODEL}",
     )
     parser.add_argument(
-        "--source", default=DEFAULT_SOURCE,
+        "--source", type=Path, default=DEFAULT_SOURCE,
         help=f"输入图片目录，默认为 {DEFAULT_SOURCE}",
     )
     parser.add_argument(
-        "--output", default=DEFAULT_OUTPUT_DIR,
+        "--output", type=Path, default=DEFAULT_OUTPUT_DIR,
         help=f"输出目录；未指定时以 {DEFAULT_OUTPUT_DIR} 为标准目录，实际批次由运行模式决定。",
     )
     parser.add_argument(

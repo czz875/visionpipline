@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import cv2
 import numpy as np
 import sys
 from tqdm import tqdm
@@ -21,9 +20,12 @@ from tools.core import (
     build_batch_stage_dir,
     find_json_for_image,
     list_images,
+    load_labelme,
+    read_image,
     save_labelme,
+    write_image,
 )
-from tools.annotate.ops import extract_existing_label_boxes, rewrite_labelme_dict
+from tools.annotate.ops import group_rect_boxes_by_label, rewrite_labelme_dict
 from tools.annotate.runners.common import (
     BoxSource,
     build_source,
@@ -96,7 +98,7 @@ def run_onnx(args) -> int:
 
         total_onnx = total_keep = total_blackout = total_json = 0
         for image_path in tqdm(image_paths, desc="覆盖标注", unit="img"):
-            image = cv2.imread(str(image_path))
+            image = read_image(image_path)
             if image is None:
                 print(f"[警告] 无法读取图片，跳过：{image_path}", file=sys.stderr)
                 continue
@@ -105,9 +107,25 @@ def run_onnx(args) -> int:
             sources = [
                 build_source(onnx_boxes, args.onnx_label, args.onnx_min_ratio, image.shape)
             ]
-            for label in resolve_keep_labels(json_path, args.onnx_label, keep_labels):
-                keep_boxes = extract_existing_label_boxes(json_path, label)
-                sources.append(build_source(keep_boxes, label, min_keep_ratio, image.shape))
+            keep_labels_for_image = resolve_keep_labels(
+                json_path, args.onnx_label, keep_labels
+            )
+            if keep_labels_for_image:
+                # 一次读 JSON 后按标签分组取框，避免每个类别重复解析同一个文件。
+                keep_data = load_labelme(json_path) if json_path.exists() else {"shapes": []}
+                boxes_by_label = group_rect_boxes_by_label(keep_data)
+                for label in keep_labels_for_image:
+                    keep_boxes = boxes_by_label.get(label, [])
+                    if not keep_boxes:
+                        continue
+                    sources.append(
+                        build_source(
+                            np.array(keep_boxes, dtype=np.float32),
+                            label,
+                            min_keep_ratio,
+                            image.shape,
+                        )
+                    )
             image, boxes, labels, n = run_multi_source_annotation(
                 image,
                 sources,
@@ -121,7 +139,7 @@ def run_onnx(args) -> int:
             total_json += 1
             if not args.dry_run:
                 data = rewrite_labelme_dict(json_path, boxes, labels, image.shape, image_path.name)
-                cv2.imwrite(str(image_path), image)
+                write_image(image_path, image)
                 save_labelme(data, json_path)
 
         mode = "预览" if args.dry_run else "完成"

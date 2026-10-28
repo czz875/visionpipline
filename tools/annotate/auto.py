@@ -79,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
         ret = run_supervision(args)
 
     if args.output is not None:
-        print(f"OUTPUT_PATH:{args.output.resolve()}")
+        print(f"OUTPUT_PATH:{Path(args.output).resolve()}")
     return ret
 
 
