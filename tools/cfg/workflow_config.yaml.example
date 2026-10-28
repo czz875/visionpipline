@@ -1,22 +1,22 @@
 # tools/cfg/workflow_config.yaml.example
 # 项目级覆盖入口示例。首次使用流程：
-#   1) copy tools\cfg\workflow_config.yaml.example tools\cfg\workflow_config.yaml
+#   1) copy tools\cfg\workflow_config.yaml.example src\workflow_config.yaml
 #   2) 编辑 paths 等项目特定项
 #   3) .conda\python.exe tools\workflow.py --dry-run
 #
+# 一次性 / 本地覆盖配置放 src/（不入 git），不要写进 tools/cfg/。
 # tools/cfg/ 下完整配置结构：
 #   - default.yaml                  系统默认（paths / parameters / log_file）
-#   - workflow.yaml                 系统主工作流（20 个 stage）
-#   - workflow_config.yaml          项目级覆盖入口（用户可改）
-#   - workflow_config.yaml.example  本文件
+#   - workflow.yaml                 系统主工作流（全部 stage）
+#   - workflow_config.yaml.example  本文件（覆盖模板）
 #
-# tools/workflow.py 默认走 workflow_config.yaml；想直接跑系统主工作流可
-# 显式 --config tools\cfg\workflow.yaml。
+# tools/workflow.py 的默认入口按顺序回退：tools/cfg/workflow_config.yaml →
+# src/workflow_config.yaml → tools/cfg/workflow.yaml。
 
 # ---------- 项目特定覆盖 ----------
 paths:
   # 接续段（备份 / autolabel 接续 / JSON 修复 / 重命名）
-  backup_dir: C:/Users/EDY/Pictures
+  backup_dir: archive/backups
   autolabel: datasets/autolabel
   behavior: datasets/behavior
 

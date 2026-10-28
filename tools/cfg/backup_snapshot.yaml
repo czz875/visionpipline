@@ -8,7 +8,7 @@
 paths:
   autolabel: datasets/autolabel
   behavior: datasets/behavior
-  backup_dir: C:/Users/EDY/Pictures
+  backup_dir: archive/backups
 
 parameters:
   snapshot_level: 6

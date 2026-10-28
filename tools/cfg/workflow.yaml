@@ -91,15 +91,25 @@ stages:
       --cleanup-crop
 
   - name: clean_orphan
-    command: python tools/clean/orphan_json.py --dataset-path ${paths.annotated} --recursive
+    command: >
+      python tools/clean/orphan_json.py
+      --dataset-path ${paths.annotated}
+      --recursive
+      --apply
 
   - name: remove_missing
-    command: python tools/clean/orphan_images.py --dataset-path ${paths.annotated} --recursive
+    command: >
+      python tools/clean/orphan_images.py
+      --dataset-path ${paths.annotated}
+      --recursive
+      --apply
 
+  # 人工清洗检查点：本阶段不做任何数据变更，只提示。真正停下由 --to-stage 实现，
+  # 例如 `python tools/workflow.py --to-stage manual_review` 会在本阶段前返回。
   - name: manual_review
     command: >
       echo "请人工检查并修正 ${paths.annotated}，完成后运行："
-      echo "  python tools/workflow.py --config tools/cfg/workflow.yaml --from-stage select_subset"
+      echo "  python tools/workflow.py --from-stage select_subset"
 
   # ---------- 第二段：训练循环（人工清洗后执行） ----------
   - name: select_subset
@@ -119,9 +129,10 @@ stages:
       --classes ${parameters.yolo_classes}
 
   - name: train_yolo
+    output_var: yolo_train_dir
     command: >
       yolo detect train
-      data=${paths.yolo}/all/data.yaml
+      data=${paths.yolo}/0001/data.yaml
       model=${parameters.yolo_weights}
       epochs=${parameters.yolo_epochs}
       project=${paths.model_dir}
@@ -141,16 +152,20 @@ stages:
       python tools/convert/yolo_to_labelme.py
       --images ${paths.remaining}
       --labels ${paths.self_annotated_labels}
-      --classes ${paths.yolo}/all/data.yaml
+      --classes ${paths.yolo}/0001/data.yaml
       --output ${paths.labelme_final}
 
   - name: final_clean
-    command: python tools/clean/orphan_json.py --dataset-path ${paths.labelme_final} --recursive
+    command: >
+      python tools/clean/orphan_json.py
+      --dataset-path ${paths.labelme_final}
+      --recursive
+      --apply
 
   - name: archive
     command: >
       python tools/train/archive.py
-      --sources ${paths.high_quality},${paths.yolo},${paths.model_dir},${paths.labelme_final}
+      --sources ${paths.high_quality},${paths.model_dir},${paths.labelme_final}
       --output ${paths.archive}
       --tag ${project.name}
       --note "每日训练归档"
@@ -159,6 +174,6 @@ stages:
     enabled: false
     command: >
       python tools/train/create_tar_gz.py
-      --input ${paths.archive}/latest
+      --input ${latest:${paths.archive}/*}
       --output ${paths.archive}/latest.tar.gz
       --level ${parameters.tar_gz_level}

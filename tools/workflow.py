@@ -2,8 +2,9 @@
 工作流编排器（仿 ultralytics 风格的薄编排层）。
 
 只负责"按顺序跑 stage"这一件事；YAML 解析、变量替换、配置合并都搬到了
-``tools.cfg``。默认从 ``tools/cfg/workflow_config.yaml`` 加载项目入口，
-自动叠加 ``tools/cfg/default.yaml`` + ``tools/cfg/workflow.yaml``。
+``tools.cfg``。默认入口按顺序回退：``tools/cfg/workflow_config.yaml`` →
+``src/workflow_config.yaml`` → ``tools/cfg/workflow.yaml``，并自动叠加
+``tools/cfg/default.yaml`` + ``tools/cfg/workflow.yaml``。
 
 典型用法：
 
@@ -38,6 +39,7 @@ from tools.cfg import (
     DEFAULT_LOG,
     PROJECT_CFG_PATH,
     PROJECT_ROOT,
+    WORKFLOW_CFG_PATH,
     flatten_dict,
     resolve_config,
     substitute_variables,
@@ -72,6 +74,14 @@ if _conda_dir is not None and sys.platform == "win32":
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
+# 父进程自身也要能打印子进程回传的 UTF-8 字符（✔ ━ 等）。GBK 控制台下
+# print 会抛 UnicodeEncodeError 并中断整个工作流，因此统一改成 UTF-8 + 替换。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, OSError):  # 已重定向到不支持 reconfigure 的流
+    pass
+
 # 子进程 stdout/stderr 解码配置：UTF-8 + 宽容替换，避免任何残留非 UTF-8 字节炸掉
 # 整个工作流。放在文件顶部，两处 subprocess.Popen 统一引用。
 _SUBPROC_ENCODING = "utf-8"
@@ -82,7 +92,16 @@ _SUBPROC_ERRORS = "replace"
 # 1. 默认参数
 # =============================================================================
 
-DEFAULT_CONFIG = PROJECT_CFG_PATH                 # 默认 tools/cfg/workflow_config.yaml
+# 默认入口按顺序回退：项目级覆盖（tools/cfg）→ 本地入口（src，不入 git）→ 主工作流。
+DEFAULT_CONFIG_CANDIDATES: tuple[Path, ...] = (
+    PROJECT_CFG_PATH,
+    PROJECT_ROOT / "src" / "workflow_config.yaml",
+    WORKFLOW_CFG_PATH,
+)
+DEFAULT_CONFIG = next(
+    (p for p in DEFAULT_CONFIG_CANDIDATES if p.exists()),
+    WORKFLOW_CFG_PATH,
+)
 DEFAULT_LOG_FILE = DEFAULT_LOG                    # workflow.log（在 tools/cfg/__init__.py 里定义）
 
 
@@ -133,7 +152,11 @@ def run_stage(
     dry_run: bool,
     log_path: Path,
 ) -> bool:
-    """执行单个 stage。成功返回 ``True``，失败返回 ``False``。"""
+    """执行单个 stage。成功返回 ``True``，失败返回 ``False``。
+
+    变量无法解析时抛 ``KeyError``（由 ``run()`` 统一转成错误退出码），
+    避免把字面量 ``${paths.xxx}`` 当路径传给子进程。
+    """
     name = stage.get("name", "unnamed")
     raw_command = stage.get("command", "")
     if not raw_command:
@@ -142,7 +165,6 @@ def run_stage(
 
     command = substitute_variables(raw_command, mapping)
     now = datetime.now().isoformat(timespec="seconds")
-
     print(f"\n[{now}] >>> 阶段：{name}")
     print(f"    {command}")
 
@@ -165,13 +187,15 @@ def run_stage(
         errors=_SUBPROC_ERRORS,
         bufsize=1,
     )
-    stdout_lines: list[str] = []
+    # 只保留匹配 OUTPUT_PATH 的行，正文直接流式打印，避免长任务把全部 stdout
+    # 驻留内存（自标注 / 训练日志可达数十 MB）。
+    output_lines: list[str] = []
     assert process.stdout is not None
     for line in process.stdout:
-        stdout_lines.append(line)
+        if line.startswith("OUTPUT_PATH:"):
+            output_lines.append(line)
         print(f"    {line}", end="")
     return_code = process.wait()
-    stdout_text = "".join(stdout_lines)
 
     if return_code != 0:
         print(f"    [失败] 阶段 {name} 返回码 {return_code}")
@@ -184,7 +208,7 @@ def run_stage(
 
     print(f"    [完成] 阶段 {name}")
 
-    _capture_output_var(stage, stdout_text, command, mapping)
+    _capture_output_var(stage, "".join(output_lines), command, mapping)
 
     return True
 
@@ -261,12 +285,13 @@ def run_group(
         if stdout:
             for line in stdout.splitlines():
                 print(f"    {line}")
+        # 成功时也输出 stderr：告警（如「N 张图片无法读取」）不应被吞掉。
+        if stderr:
+            for line in stderr.splitlines():
+                print(f"    [stderr] {line}")
 
         if proc.returncode != 0:
             print(f"    [失败] 阶段 {name} 返回码 {proc.returncode}")
-            if stderr:
-                for line in stderr.splitlines():
-                    print(f"    {line}")
             with log_path.open("a", encoding="utf-8") as log:
                 log.write(
                     f"[{datetime.now().isoformat(timespec='seconds')}] "
@@ -275,7 +300,7 @@ def run_group(
             ok = False
         else:
             print(f"    [完成] 阶段 {name}")
-            _capture_output_var(s, stdout, command, mapping)
+            _capture_output_var(s, stdout or "", command, mapping)
     return ok
 
 
@@ -333,7 +358,7 @@ def run(
         python tools/workflow.py --config <cfg> [--dry-run] \
             [--from-stage X] [--to-stage Y]
 
-    ``cfg`` 为 None 时走 ``tools/cfg/workflow_config.yaml`` 默认入口。
+    ``cfg`` 为 None 时按 ``DEFAULT_CONFIG_CANDIDATES`` 回退取默认入口。
 
     ``config`` 为已解析好的 dict 时直接用它（跳过文件加载），便于在 Python 里
     动态改写 stages / paths / parameters 后再跑——这就是「参数覆盖 yaml」的入口。
@@ -347,7 +372,7 @@ def run(
     if config is not None:
         resolved = config
     else:
-        config_path = Path(cfg) if cfg is not None else PROJECT_CFG_PATH
+        config_path = Path(cfg) if cfg is not None else DEFAULT_CONFIG
         if not config_path.exists():
             print(f"[错误] 配置文件不存在：{config_path}")
             return 1
@@ -374,6 +399,17 @@ def run(
         print("[警告] 配置文件中没有定义 stages。")
         return 0
 
+    # 断点参数必须先校验：拼错 stage 名时若静默空跑，定时任务会「成功」却什么也没做。
+    stage_names = [s.get("name", "") for s in stages]
+    if from_stage and from_stage not in stage_names:
+        print(f"[错误] --from-stage 指定的阶段不存在：{from_stage}")
+        print(f"       可用阶段：{', '.join(n for n in stage_names if n)}")
+        return 1
+    if to_stage and to_stage not in stage_names:
+        print(f"[错误] --to-stage 指定的阶段不存在：{to_stage}")
+        print(f"       可用阶段：{', '.join(n for n in stage_names if n)}")
+        return 1
+
     # 按 order 分组：order 相同 → 同一组，组内并行；组间按 order 升序顺序执行。
     # 未写 order 的 stage 退化成「列表位置」，即各自独立成组、保序顺序执行。
     ordered = sorted(
@@ -396,6 +432,8 @@ def run(
     for group in groups:
         names = [s.get("name", "") for s in group]
 
+        # --to-stage 按 stage 粒度判断：只跳过该 stage 本身，同序并行组里其它
+        # stage 仍按原计划执行。
         if to_stage and to_stage in names:
             print(f"\n[暂停] 已到达阶段 '{to_stage}' 前，等待人工处理。")
             return 0
@@ -410,7 +448,12 @@ def run(
         if not started:
             continue
 
-        if not run_group(group, mapping, dry_run, log_path):
+        try:
+            group_ok = run_group(group, mapping, dry_run, log_path)
+        except KeyError as e:
+            print(f"\n[终止] 阶段变量无法解析：{e}")
+            return 1
+        if not group_ok:
             print(f"\n[终止] 同序组内某阶段失败，工作流中断。")
             return 1
 

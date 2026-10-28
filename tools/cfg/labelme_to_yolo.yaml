@@ -25,3 +25,4 @@ stages:
       --out ${paths.yolo}
       --classes ${parameters.yolo_classes}
       --ratios ${parameters.ratios}
+      --seed ${parameters.seed}

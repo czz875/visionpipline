@@ -13,11 +13,15 @@ from tools.core import (
     list_labelme_files,
 )
 
+# 默认参数（集中放文件顶部，argparse 统一引用）
+DEFAULT_RECURSIVE = False
+DEFAULT_DRY_RUN = True
+
 
 def _build_parser() -> argparse.ArgumentParser:
     """构造命令行参数解析器。"""
     parser = argparse.ArgumentParser(
-        description="删除没有对应图片的 LabelMe JSON 文件。"
+        description="删除没有对应图片的 LabelMe JSON 文件（默认预览，加 --apply 才真删）。"
     )
     parser.add_argument(
         "--dataset-path",
@@ -28,7 +32,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--recursive",
         action="store_true",
+        default=DEFAULT_RECURSIVE,
         help="递归处理子目录（默认只处理顶层）。",
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="确认预览无误后，加 --apply 才真正删除（默认 dry-run）。",
     )
     return parser
 
@@ -36,16 +46,23 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     """脚本入口。"""
     args = _build_parser().parse_args()
+    dry_run = not args.apply
     json_files = list_labelme_files(args.dataset_path.resolve(), recursive=args.recursive)
 
     deleted = 0
     for json_file in json_files:
         if find_image_for_json(json_file) is None:
-            print(f"删除无图片JSON: {json_file.name}")
-            json_file.unlink()
+            if dry_run:
+                print(f"[预览] 将删除无图片JSON: {json_file.name}")
+            else:
+                print(f"删除无图片JSON: {json_file.name}")
+                json_file.unlink()
             deleted += 1
 
-    print(f"\n完成，共删除 {deleted} 个JSON")
+    if dry_run:
+        print(f"\n[预览] 共 {deleted} 个JSON无对应图片，未删除；确认无误请加 --apply。")
+    else:
+        print(f"\n完成，共删除 {deleted} 个JSON")
     return 0
 
 
