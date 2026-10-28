@@ -27,6 +27,7 @@ if __name__ == "__main__" and __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from tools.core import build_timestamped_output_dir  # noqa: E402
+from tools.core.image_io import read_image, write_image  # noqa: E402
 from tools.core.labelme import load_labelme, save_labelme  # noqa: E402
 
 # =============================================================================
@@ -147,16 +148,20 @@ def process_single_file(
     counters: dict,
 ) -> bool:
     """处理单个 JPG：转 PNG + 修复同名 JSON。"""
-    img = cv2.imread(str(jpg_path), cv2.IMREAD_UNCHANGED)
+    img = read_image(jpg_path, cv2.IMREAD_UNCHANGED)
     if img is None:
         with print_lock:
             print("读取失败:", jpg_path)
         return False
 
     png_path.parent.mkdir(parents=True, exist_ok=True)
-    if not cv2.imwrite(str(png_path), img, [cv2.IMWRITE_PNG_COMPRESSION, png_compression]):
+    try:
+        write_image(
+            png_path, img, [cv2.IMWRITE_PNG_COMPRESSION, png_compression]
+        )
+    except OSError as e:
         with print_lock:
-            print("保存失败:", png_path)
+            print(f"保存失败: {png_path}（{e}）")
         return False
 
     with print_lock:

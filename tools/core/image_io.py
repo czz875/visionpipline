@@ -36,7 +36,11 @@ def read_image(image_path: Path | str, flags: int = cv2.IMREAD_COLOR) -> np.ndar
     return cv2.imdecode(buffer, flags)
 
 
-def write_image(image_path: Path | str, image: np.ndarray) -> None:
+def write_image(
+    image_path: Path | str,
+    image: np.ndarray,
+    params: list[int] | None = None,
+) -> None:
     """按字节写出图片，兼容中文路径。
 
     编码或写盘失败时抛 ``OSError``。此处必须检查返回值：``cv2.imwrite`` 在中文
@@ -45,13 +49,15 @@ def write_image(image_path: Path | str, image: np.ndarray) -> None:
     Args:
         image_path: 目标图片路径，扩展名决定编码格式。
         image: 待写出的图像数组。
+        params: 传给 ``cv2.imencode`` 的编码参数，如
+            ``[cv2.IMWRITE_PNG_COMPRESSION, 9]``。
 
     Raises:
         OSError: 编码失败或写盘失败。
     """
     image_path = Path(image_path)
     suffix = image_path.suffix or ".png"
-    success, encoded = cv2.imencode(suffix, image)
+    success, encoded = cv2.imencode(suffix, image, params or [])
     if not success:
         raise OSError(f"图片编码失败：{image_path}")
     try:

@@ -337,6 +337,34 @@ def write_data_yaml(out_dir: Path, class_names: list[str], splits: Iterable[str]
 # =============================================================================
 
 
+def _prune_stale_split_files(
+    label_dir: Path,
+    image_dir: Path,
+    split_name: str,
+    keep_names: list[str],
+) -> int:
+    """删除该 split 目录中不属于本次划分的残留文件。
+
+    增量重跑时全批次会重新 shuffle，某张图可能从 train 换到 val。旧副本若留在
+    原目录，同一张图会同时出现在 ``images/train`` 和 ``images/val``，造成
+    train/val 泄漏（下游按目录消费时尤其严重）。
+
+    Returns:
+        删除的文件数。
+    """
+    keep = {Path(name).stem for name in keep_names}
+    removed = 0
+    for path in (image_dir / split_name).glob("*"):
+        if path.is_file() and path.stem not in keep:
+            path.unlink()
+            removed += 1
+    for path in (label_dir / split_name).glob("*.txt"):
+        if path.stem not in keep:
+            path.unlink()
+            removed += 1
+    return removed
+
+
 def process_batch(
     batch_name: str,
     json_files: list[Path],
@@ -427,6 +455,7 @@ def process_batch(
                 hardlink=hardlink_images,
             )
             converted += 1
+        _prune_stale_split_files(label_dir, image_dir, split_name, image_names)
         write_split_list(out_dir, split_name, image_names)
 
     write_data_yaml(out_dir, class_names, splits)
