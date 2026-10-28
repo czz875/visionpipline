@@ -116,8 +116,14 @@ def test_labelme_roundtrip(tmp_path: Path) -> None:
     assert list_labelme_files(tmp_path) == [target]
 
 
-def test_detections_to_labelme_dict_skips_out_of_range_class_ids() -> None:
+def test_detections_to_labelme_dict_rejects_out_of_range_class_ids() -> None:
+    """类别 id 超出类别表时必须报错。
+
+    原先静默 continue，标注无声消失（例如 --classes 少于磁盘 data.yaml 的
+    类别数时），用户只看到框变少却没有任何提示。
+    """
     import numpy as np
+    import pytest
     import supervision as sv
 
     detections = sv.Detections(
@@ -125,14 +131,35 @@ def test_detections_to_labelme_dict_skips_out_of_range_class_ids() -> None:
         class_id=np.array([0, 5], dtype=int),
     )
 
+    with pytest.raises(ValueError, match="类别"):
+        detections_to_labelme_dict(
+            detections,
+            class_names=["a"],
+            image_path="x.png",
+            image_width=100,
+            image_height=100,
+        )
+
+
+def test_detections_to_labelme_dict_accepts_in_range_class_ids() -> None:
+    """类别 id 都在范围内时正常转换（守护）。"""
+    import numpy as np
+    import supervision as sv
+
+    detections = sv.Detections(
+        xyxy=np.array([[0, 0, 10, 10], [1, 1, 5, 5]], dtype=np.float32),
+        class_id=np.array([0, 1], dtype=int),
+    )
+
     data = detections_to_labelme_dict(
         detections,
-        class_names=["a"],
+        class_names=["a", "b"],
         image_path="x.png",
         image_width=100,
         image_height=100,
     )
 
-    assert len(data["shapes"]) == 1
+    assert len(data["shapes"]) == 2
     assert data["shapes"][0]["label"] == "a"
+    assert data["shapes"][1]["label"] == "b"
     assert data["imageWidth"] == 100

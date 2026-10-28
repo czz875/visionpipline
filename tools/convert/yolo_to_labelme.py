@@ -115,6 +115,34 @@ def build_labelme_data(
     )
 
 
+def _unique_stem(image_path: Path, images_dir: Path, used: set[str]) -> str:
+    """为图片生成在输出目录内唯一的 stem。
+
+    输入目录可能含子目录，不同子目录里的同名图片若直接按 ``stem`` 平铺输出，
+    后写的会覆盖先写的，静默丢标注且计数虚高。冲突时用父目录名做前缀，
+    与 ``supervision`` 导出的 ``_unique_stem`` 思路一致。
+    """
+    if image_path.stem not in used:
+        return image_path.stem
+    try:
+        rel_parent = image_path.parent.relative_to(images_dir)
+        prefix = "_".join(rel_parent.parts) if rel_parent.parts else ""
+    except ValueError:
+        prefix = image_path.parent.name
+    if prefix:
+        candidate = f"{prefix}_{image_path.stem}"
+        if candidate not in used:
+            return candidate
+        i = 1
+        while f"{candidate}_{i}" in used:
+            i += 1
+        return f"{candidate}_{i}"
+    i = 1
+    while f"{image_path.stem}_{i}" in used:
+        i += 1
+    return f"{image_path.stem}_{i}"
+
+
 def convert_yolo_to_labelme(
     images_dir: Path,
     labels_dir: Path,
@@ -127,6 +155,8 @@ def convert_yolo_to_labelme(
     会写出 shapes=0 的 JSON 并报告成功，下游拿到的是「全部无框」的数据。
 
     空 txt（0 行）是合法的负样本，照常写成空 shapes。
+
+    不同子目录的同名图片通过 ``_unique_stem`` 去重，不会互相覆盖。
 
     Returns:
         成功生成的 JSON 数量。
@@ -141,14 +171,19 @@ def convert_yolo_to_labelme(
         return 0
 
     generated = 0
+    used_stems: set[str] = set()
     for image_path in images:
         label_path = labels_dir / f"{image_path.stem}.txt"
         if not label_path.exists():
             raise FileNotFoundError(
                 f"图片 {image_path.name} 的标签文件不存在：{label_path}"
             )
+        stem = _unique_stem(image_path, images_dir, used_stems)
+        used_stems.add(stem)
         data = build_labelme_data(image_path, label_path, class_names)
-        save_labelme(data, output_dir / f"{image_path.stem}.json")
+        # imagePath 必须与输出文件名一致，否则 LabelMe 打开后指向另一张图。
+        data["imagePath"] = f"{stem}{image_path.suffix}"
+        save_labelme(data, output_dir / f"{stem}.json")
         generated += 1
 
     return generated
@@ -209,7 +244,7 @@ def main() -> int:
             class_names,
             args.output.resolve(),
         )
-    except FileNotFoundError as e:
+    except (FileNotFoundError, ValueError) as e:
         print(f"[错误] {e}")
         return 1
     print(f"已生成 {count} 个 LabelMe JSON 到 {args.output}")

@@ -217,7 +217,12 @@ def detections_to_labelme_dict(
             x1, y1, x2, y2 = detections.xyxy[i].tolist()
             class_id = int(detections.class_id[i])
             if class_id < 0 or class_id >= len(class_names):
-                continue
+                # 静默跳过会让标注无声消失（如 --classes 少于磁盘 data.yaml 的类别数），
+                # 用户只看到框变少却没有任何提示。
+                raise ValueError(
+                    f"类别 id {class_id} 超出类别表范围（共 {len(class_names)} 类："
+                    f"{', '.join(class_names)}）。请检查 --classes 是否与标注的类别数一致。"
+                )
             shapes.append({
                 "label": class_names[class_id],
                 "points": [[x1, y1], [x2, y2]],

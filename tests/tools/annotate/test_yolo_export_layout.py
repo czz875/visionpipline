@@ -19,6 +19,7 @@ class _FakeDataset:
 
     def __init__(self, images: list[str], classes: list[str], boxes_per_image: int = 1):
         self.classes = classes
+        self.image_paths = list(images)  # 真实 sv.DetectionDataset 也暴露此属性
         self._images = images
         self._boxes = boxes_per_image
 

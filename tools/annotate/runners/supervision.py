@@ -260,6 +260,34 @@ def _rewrite_yolo_data_yaml(output: Path, class_names: list[str]) -> None:
     (output / "data.yaml").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _check_yolo_basename_collisions(dataset) -> None:
+    """检测 YOLO 导出会发生的同名覆盖。
+
+    supervision 的 ``as_yolo`` 按图片 basename 命名标签文件，不同子目录的同名
+    图片会互相覆盖、静默丢标注。这里提前检测并报错，让调用方显式处理，而不是
+    拿到一份少了标注的数据集却看到「成功」。
+
+    Raises:
+        ValueError: 存在同名图片。
+    """
+    seen: dict[str, str] = {}
+    collisions: list[str] = []
+    for image_path in dataset.image_paths:
+        path = Path(image_path)
+        name = path.name
+        if name in seen and seen[name] != str(path):
+            collisions.append(f"{seen[name]} 与 {path}")
+        seen.setdefault(name, str(path))
+    if collisions:
+        sample = "\n    ".join(collisions[:5])
+        more = f"\n    ... 另有 {len(collisions) - 5} 组" if len(collisions) > 5 else ""
+        raise ValueError(
+            f"YOLO 导出按文件名平铺，存在 {len(collisions)} 组同名图片会互相覆盖：\n"
+            f"    {sample}{more}\n"
+            f"请改用 --format labelme（已按子目录去重），或先重命名同名图片。"
+        )
+
+
 def export_detection_dataset(
     dataset, output: Path, fmt: str, copy_images: bool
 ) -> None:
@@ -272,6 +300,7 @@ def export_detection_dataset(
     output.mkdir(parents=True, exist_ok=True)
     images_dir = output / "images"
     if fmt == "yolo":
+        _check_yolo_basename_collisions(dataset)
         if copy_images:
             images_dir.mkdir(parents=True, exist_ok=True)
         labels_dir = output / "labels"
