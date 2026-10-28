@@ -29,6 +29,8 @@ from tqdm import tqdm
 if __name__ == "__main__" and __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+from tools.core import IMAGE_EXTENSIONS
+
 
 # =============================================================================
 # 1. 默认参数
@@ -37,8 +39,6 @@ if __name__ == "__main__" and __package__ in (None, ""):
 DEFAULT_ROOT = Path("datasets/behavior")
 DEFAULT_RECURSIVE = True
 DEFAULT_DRY_RUN = True
-
-IMAGE_SUFFIXES: tuple[str, ...] = (".png", ".jpg", ".jpeg")
 
 
 # =============================================================================
@@ -55,13 +55,13 @@ def collect_files(
     if recursive:
         pngs = [
             p for p in root.rglob("*")
-            if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES
+            if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
         ]
         jsons = [p for p in root.rglob("*.json") if p.is_file()]
     else:
         pngs = [
             p for p in root.iterdir()
-            if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES
+            if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS
         ]
         jsons = [p for p in root.iterdir() if p.is_file() and p.suffix.lower() == ".json"]
     return sorted(pngs), sorted(jsons)

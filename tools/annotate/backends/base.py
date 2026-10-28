@@ -15,7 +15,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 # 类型别名仅用于内部提示，不在运行时强制导入 supervision，避免 --help 阶段
-# 触发昂贵依赖加载。
+# 触发昂贵依赖加载。``DetectionsLike`` / ``DatasetLike`` 由 backends/__init__.py
+# 统一对外导出，供新增后端与测试引用。
 if TYPE_CHECKING:
     import supervision as sv
 

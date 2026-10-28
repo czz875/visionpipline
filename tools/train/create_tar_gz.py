@@ -28,7 +28,7 @@ if __name__ == "__main__" and __package__ in (None, ""):
 # 1. 默认参数
 # =============================================================================
 
-DEFAULT_INPUT_DIR = r"D:\A_CJET_WORKSPACE\YOLO_Detect\BEHAVIOR_DETECT\BehaviorData\Datasets_train\20250701_Call_Smoke_Face_IR"
+DEFAULT_INPUT_DIR = Path("archive")
 DEFAULT_GZ_LEVEL = 6
 DEFAULT_SUFFIX = ".tar.gz"
 

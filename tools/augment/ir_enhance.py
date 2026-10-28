@@ -47,7 +47,7 @@ from tools.core import build_timestamped_output_dir  # noqa: E402
 # 1. 默认参数
 # =============================================================================
 
-DEFAULT_INPUT_DIR = r"D:\A_CJET_WORKSPACE\01_CJET_DATASET\11_activateBody\yongqing_all_txt"
+DEFAULT_INPUT_DIR = Path("datasets/raw")
 DEFAULT_OUTPUT_DIR = Path("datasets/raw_ir_aug")
 DEFAULT_REPEAT = 3
 DEFAULT_MAX_WORKERS = 8
@@ -376,11 +376,15 @@ def augment_dataset(
     expand_min: float = DEFAULT_LOCAL_LIGHT_EXPAND_MIN,
     expand_max: float = DEFAULT_LOCAL_LIGHT_EXPAND_MAX,
     recursive: bool = DEFAULT_RECURSIVE,
-) -> None:
-    """批量对数据集执行 IR 增强。"""
+) -> int:
+    """批量对数据集执行 IR 增强。
+
+    Returns:
+        失败的图像组数量；0 表示全部成功。
+    """
     if not input_dir.exists():
-        print(f"[错误] 输入目录不存在：{input_dir}")
-        return
+        print(f"[错误] 输入目录不存在：{input_dir}", file=sys.stderr)
+        return 1
 
     _ensure_dir(output_dir)
     pairs = collect_image_label_pairs(input_dir, input_dir)
@@ -408,15 +412,28 @@ def augment_dataset(
             )
             for img_path, lbl_path, rel_dir in pairs
         ]
-        for _ in tqdm(
+        failed: list[tuple[str, BaseException]] = []
+        for future in tqdm(
             as_completed(futures),
             total=len(futures),
             desc="IR 光照增强",
             ncols=100,
         ):
-            pass
+            # 必须取 result()：否则 worker 抛出的异常会被 as_completed 静默吞掉，
+            # 任务全失败也照样打印「完成」。
+            try:
+                future.result()
+            except Exception as e:  # noqa: BLE001 - 汇总后统一报告
+                failed.append((str(future), e))
+
+    if failed:
+        print(f"\n[失败] {len(failed)} 组图像增强失败：", file=sys.stderr)
+        for name, err in failed[:10]:
+            print(f"  - {name}: {err}", file=sys.stderr)
+        return len(failed)
 
     print("[完成] IR 图像增强完成。")
+    return 0
 
 
 # =============================================================================
@@ -501,7 +518,7 @@ def main() -> int:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-    augment_dataset(
+    failed = augment_dataset(
         input_dir=args.input_dir,
         output_dir=output_dir,
         repeat=args.repeat,
@@ -511,9 +528,11 @@ def main() -> int:
         expand_max=args.expand_max,
         recursive=args.recursive,
     )
+    if failed:
+        print(f"[错误] {failed} 组图像增强失败，详见上方日志。", file=sys.stderr)
+        return 1
     print(f"OUTPUT_PATH:{output_dir.resolve()}")
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

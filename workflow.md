@@ -32,7 +32,7 @@ tools/rename/timestamp_rename.py      按时间戳改名 + 同步 JSON 的 image
 JPG 原始数据（可选）──► tools/convert/jpg_to_png.py ──► PNG
                                                         │
                                                         ▼
-补充 PNG 数据（固定尺寸，由 project.image_width/height 控制）
+补充 PNG 数据（固定尺寸；`project.image_width/height` 仅作记录，脚本不据此缩放）
     │
     ▼
 多后端自动标注（YOLO / SAM3 / DETR / ONNX）──► LabelMe JSON
@@ -168,13 +168,16 @@ JPG 原始数据（可选）──► tools/convert/jpg_to_png.py ──► PNG
 1. 复制示例配置（首次使用）：
 
    ```bash
-   copy tools\cfg\workflow_config.yaml.example tools\cfg\workflow_config.yaml
+   copy tools\cfg\workflow_config.yaml.example src\workflow_config.yaml
    ```
+
+   一次性 / 临时覆盖配置放 `src/`（不入 git）。`tools/workflow.py` 的默认入口按顺序回退：
+   `tools/cfg/workflow_config.yaml` → `src/workflow_config.yaml` → `tools/cfg/workflow.yaml`。
 
 2. 修改配置（按实际路径/参数；重点是 `paths` 与 `project`）：
    - `tools/cfg/default.yaml`：系统默认
    - `tools/cfg/workflow.yaml`：完整工作流 stage 定义
-   - `tools/cfg/workflow_config.yaml`：项目级覆盖（默认入口）
+   - `src/workflow_config.yaml`：项目级覆盖（默认入口）
 
 3. **第零段（数据接续）**——补数据时跑：
 
@@ -207,10 +210,11 @@ JPG 原始数据（可选）──► tools/convert/jpg_to_png.py ──► PNG
 4. **第一段（准备）**——跑到人工清洗检查点停：
 
    ```bash
-   .conda\python.exe tools\workflow.py --from-stage auto_annotate
+   .conda\python.exe tools\workflow.py --from-stage auto_annotate --to-stage manual_review
    ```
 
-   到达 `manual_review` 之前会自动停止。
+   `manual_review` 只是一个提示阶段（`echo`），不会自己停；必须用 `--to-stage manual_review`
+   才会在它之前返回。
 
 5. 人工在 LabelMe 中检查、修正 `${paths.annotated}` 目录的数据。
 

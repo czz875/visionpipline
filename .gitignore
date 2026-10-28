@@ -24,6 +24,10 @@ _*.md
 datasets/
 # 例外：保留可能需要的元数据文件
 !datasets/.gitkeep
+# tools/clean/blurry.py 的默认落盘位置在仓库根，裁剪缓存体量≈全量数据集
+datasets_label_crop/
+datasets_blurry/
+datasets_orphan_cleaned/
 
 # ===== YOLO 训练产物 =====
 runs/

@@ -90,7 +90,9 @@ visionpipline/
 ├── runs/                 # yolo detect train 输出（不入 git）
 ├── tests/                # 测试（pytest 递归收集）
 ├── src/                  # 本地入口 + 临时工作流 cfg（不入 git）
-├── requirements.txt      # 依赖清单
+├── requirements.txt      # 运行时依赖
+├── requirements-dev.txt  # 开发依赖（pytest）
+├── pyproject.toml        # 工具配置（pytest pythonpath / testpaths）
 ├── workflow.md           # 工作流说明文档
 └── AGENTS.md             # 协作说明 / 开发约定
 ```
@@ -162,7 +164,7 @@ visionpipline/
 .conda\python.exe tools\workflow.py --dry-run
 
 # 第一段：自动标注 → 人工清洗检查点停
-.conda\python.exe tools\workflow.py --from-stage auto_annotate
+.conda\python.exe tools\workflow.py --from-stage auto_annotate --to-stage manual_review
 
 # 第二段：人工清洗完后再跑（拆分 → 转 YOLO → 训练 → 自标注 → 归档）
 .conda\python.exe tools\workflow.py --from-stage select_subset
@@ -171,7 +173,11 @@ visionpipline/
 **跑测试：**
 
 ```bash
-.conda\python.exe -m pytest tests\ -q
+# 安装开发依赖（首次）
+.conda\python.exe -m pip install -r requirements-dev.txt
+
+# 在仓库根目录直接跑（pyproject.toml 已配置 pythonpath）
+.conda\python.exe -m pytest
 ```
 
 开发与验证约定见 [CONTRIBUTING.md](CONTRIBUTING.md)；工作流参数和专项配置见 [workflow.md](workflow.md)。

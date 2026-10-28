@@ -1,0 +1,27 @@
+[build-system]
+# 本项目不是要发布的包，只借用 pyproject 承载工具配置；
+# 声明 setuptools 是为了让 pip install -e . 之类的操作有明确的构建后端。
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "visionpipline"
+version = "0.1.0"
+description = "数据生产 + 模型训练流水线：自动标注、清洗、拆分、训练、归档"
+requires-python = ">=3.11"
+readme = "README.md"
+
+[tool.setuptools]
+# 只声明包目录，避免把 datasets/weight 等大目录卷进构建。
+packages = ["tools"]
+
+[tool.pytest.ini_options]
+# 让 `pytest tests\` 在仓库根直接跑通：把仓库根加入 sys.path，
+# 这样 tests 里的 `from tools.xxx import ...` 无需额外设置 PYTHONPATH。
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-ra"
+# 跳过 ultralytics 在导入期写入的缓存目录告警噪音。
+filterwarnings = [
+    "ignore::DeprecationWarning:ultralytics.*",
+]

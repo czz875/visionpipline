@@ -5,6 +5,7 @@
 
 project:
   name: cjet_dataset
+  # 记录用：脚本不做尺寸缩放，实际尺寸由采集端保证
   image_width: 1920
   image_height: 1080
 
@@ -16,7 +17,6 @@ paths:
   backup_dir: archive/backups
   behavior: datasets/behavior
   annotated: datasets/01_annotated
-  cleaned: datasets/01_annotated
   blurry_output: datasets/_blurry
   high_quality: datasets/02_high_quality_30
   remaining: datasets/02_remaining_70

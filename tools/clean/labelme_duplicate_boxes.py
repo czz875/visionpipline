@@ -15,6 +15,7 @@ from tools.core import (
     find_image_for_json,
     list_labelme_files,
     load_labelme,
+    rect_to_xyxy,
     save_labelme,
 )
 
@@ -67,9 +68,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _normalize_points(points: list[list[float]]) -> tuple[float, float, float, float]:
     """把两点矩形归一化为 (x_min, y_min, x_max, y_max)。"""
-    x1, y1 = float(points[0][0]), float(points[0][1])
-    x2, y2 = float(points[1][0]), float(points[1][1])
-    return (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
+    return rect_to_xyxy(points[:2])
 
 
 def _shape_key(shape: dict, decimals: int) -> tuple[str, tuple[float, ...]] | None:

@@ -52,5 +52,11 @@ Pillow==12.2.0
 tqdm==4.68.4
 # 读取 workflow_config.yaml 必需
 PyYAML==6.0.3
-# COCO 标注转换可选依赖
-pycocotools==2.0.11
+
+# ---------- 开发依赖 ----------
+# 运行测试（CONTRIBUTING.md 的验证命令依赖它）：pip install -r requirements-dev.txt
+# 或直接：pip install pytest
+# 见 requirements-dev.txt
+
+# 说明：pycocotools 曾被列为「COCO 标注转换可选依赖」，但仓库内没有任何 import，
+# 已从清单移除；如将来实现 COCO 导出再按需加入。

@@ -15,7 +15,10 @@ AI 助手专属规则见 [AGENTS.md](AGENTS.md)。
 在仓库根目录执行命令，优先使用项目自带的 Python 3.11：
 
 ```powershell
+# 运行时依赖
 .conda\python.exe -m pip install -r requirements.txt
+# 开发依赖（pytest 等）
+.conda\python.exe -m pip install -r requirements-dev.txt
 ```
 
 ### 改动流程
@@ -68,14 +71,18 @@ if __name__ == "__main__" and __package__ in (None, ""):
 按改动类型选择检查。下面命令使用项目解释器：
 
 ```powershell
+# 安装开发依赖（首次，含 pytest）
+.conda\python.exe -m pip install -r requirements-dev.txt
+
 # 检查单个 Python 文件语法
 .conda\python.exe -m py_compile tools\path\to\script.py
 
 # 确认命令行参数和帮助信息
 .conda\python.exe tools\path\to\script.py --help
 
-# 运行相关测试；完整测试集
-.conda\python.exe -m pytest tests\ -q
+# 运行相关测试；完整测试集（pyproject.toml 已配置 pythonpath/testpaths）
+.conda\python.exe -m pytest
+.conda\python.exe -m pytest tests\tools\convert -q
 
 # 预览工作流，不执行其中的数据变更
 .conda\python.exe tools\workflow.py --config tools\cfg\workflow.yaml --dry-run

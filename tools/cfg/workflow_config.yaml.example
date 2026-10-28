@@ -25,7 +25,6 @@ paths:
   raw_data: datasets/raw
   ir_aug: datasets/raw_ir_aug
   annotated: datasets/01_annotated
-  cleaned: datasets/01_annotated
   blurry_output: datasets/_blurry
 
   # 训练段（拆分 → YOLO → 训练 → 自标注 → 回 LabelMe → 终洗 → 归档）

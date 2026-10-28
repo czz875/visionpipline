@@ -1,4 +1,4 @@
-"""
+r"""
 tools/rename/timestamp_rename.py
 按时间戳顺序，把目录下的文件重命名为 ``YYYYMMDD_HHMMSS_NNNNNN`` 格式。
 
@@ -45,6 +45,8 @@ from tqdm import tqdm
 
 if __name__ == "__main__" and __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+from tools.core import IMAGE_EXTENSIONS
 
 
 # =============================================================================
@@ -128,7 +130,7 @@ def _plan_labelme_sync(
     只处理 PNG/JPG 的同名 JSON；JSON 不参与图片的 mtime 排序。
     返回 ``(json_old, json_new)``；找不到同名 JSON 时返回 ``None``。
     """
-    if old_image.suffix.lower() not in {".png", ".jpg", ".jpeg"}:
+    if old_image.suffix.lower() not in IMAGE_EXTENSIONS:
         return None
     json_path = old_image.with_suffix(".json")
     if not json_path.exists():
@@ -208,8 +210,7 @@ def rename_by_timestamp(
 
     attr = "st_mtime" if time_source == "mtime" else "st_ctime"
 
-    image_suffixes = {".png", ".jpg", ".jpeg"}
-    image_files = [p for p in files if p.suffix.lower() in image_suffixes]
+    image_files = [p for p in files if p.suffix.lower() in IMAGE_EXTENSIONS]
     image_files.sort(key=lambda p: getattr(p.stat(), attr))
 
     plans: list[tuple[Path, Path]] = []

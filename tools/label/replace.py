@@ -92,8 +92,14 @@ def process_labelme_file(
     output_dir: Path,
     replace_rules: dict[str, str],
     append_rules: dict[str, str],
+    *,
+    source_root: Path | None = None,
 ) -> None:
-    """读取单个 LabelMe JSON，执行替换/追加后写出，并复制同名图片。"""
+    """读取单个 LabelMe JSON，执行替换/追加后写出，并复制同名图片。
+
+    ``source_root`` 给定时按相对路径镜像到输出目录，避免不同子目录下的同名
+    JSON / 图片被扁平化后互相覆盖；``None`` 时沿用平铺行为（兼容旧调用）。
+    """
     data = load_labelme(json_path)
     shapes = data.get("shapes", [])
 
@@ -103,12 +109,19 @@ def process_labelme_file(
 
     data["shapes"] = shapes
 
-    out_json = output_dir / json_path.name
+    if source_root is not None:
+        rel_dir = json_path.parent.relative_to(source_root)
+    else:
+        rel_dir = Path()
+    out_dir = output_dir / rel_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    out_json = out_dir / json_path.name
     save_labelme(data, out_json)
 
     image_path = find_image_for_json(json_path)
     if image_path is not None:
-        shutil.copy2(str(image_path), str(output_dir / image_path.name))
+        shutil.copy2(str(image_path), str(out_dir / image_path.name))
 
 
 # =============================================================================
@@ -172,7 +185,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     for json_path in labelme_files:
-        process_labelme_file(json_path, output_dir, replace_rules, append_rules)
+        process_labelme_file(
+            json_path, output_dir, replace_rules, append_rules,
+            source_root=input_dir,
+        )
 
     print(
         f"[完成] 共处理 {len(labelme_files)} 个文件，输出到：{output_dir}"

@@ -23,6 +23,7 @@ import cv2
 import numpy as np
 
 from tools.core import load_labelme
+from tools.annotate.defaults import DEFAULT_MOSAIC_BLOCK
 
 
 # =============================================================================
@@ -108,10 +109,6 @@ def concat_boxes(box_groups: Iterable[np.ndarray]) -> np.ndarray:
     if not parts:
         return np.empty((0, 4), dtype=np.float32)
     return np.concatenate(parts, axis=0).astype(np.float32)
-
-
-# 默认马赛克块大小（像素），越大越糊。
-DEFAULT_MOSAIC_BLOCK = 16
 
 
 # =============================================================================

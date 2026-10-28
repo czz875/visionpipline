@@ -40,11 +40,11 @@ from tools.annotate.defaults import (
     DEFAULT_START_BATCH,
     DEFAULT_END_BATCH,
     DEFAULT_KEEP_MIN_RATIO,
+    DEFAULT_MOSAIC_BLOCK,
     DEFAULT_YOLO_MODEL,
     DEFAULT_SAM3_MODEL,
     DEFAULT_VERBOSE,
 )
-from tools.annotate.ops import DEFAULT_MOSAIC_BLOCK
 
 
 def build_parser() -> argparse.ArgumentParser:

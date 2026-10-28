@@ -101,7 +101,7 @@ def scale_boxes(
         return np.empty((0, 4), dtype=np.float32)
     image_h, image_w = image_shape[:2]
     input_w, input_h = input_size
-    scaled = boxes.copy().astype(np.float32)
+    scaled = boxes.astype(np.float32)  # astype 本身返回新数组，无需再 copy()
     scaled[:, [0, 2]] *= image_w / float(input_w)
     scaled[:, [1, 3]] *= image_h / float(input_h)
     return scaled

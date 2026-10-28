@@ -74,8 +74,10 @@ if __name__ == "__main__" and __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from tools.core import (
+    IMAGE_EXTENSIONS,
     build_related_batch_stage_dir,
     list_images,
+    load_labelme,
     resolve_latest_batch_stage_dir,
 )
 
@@ -91,7 +93,7 @@ DEFAULT_DRY_RUN = True
 DEFAULT_MOVE = False
 DEFAULT_DEDUP = False  # 通用参数：按 target 下 PNG/JPG basename 去重
 DEFAULT_START_BATCHES: tuple[str, ...] = ()  # 通用参数：指定起始 batch 列表
-DEFAULT_DEDUP_EXTS: tuple[str, ...] = (".png", ".jpg", ".jpeg")
+DEFAULT_DEDUP_EXTS: tuple[str, ...] = tuple(sorted(IMAGE_EXTENSIONS))
 DEFAULT_RECURSIVE = False  # 通用参数：递归扫描 source 子目录下的 PNG
 DEFAULT_NO_CLASSIFY = False  # 通用参数：不按 label 分类，直接平铺进 batch 目录
 DEFAULT_NO_BATCH_STAGE = False  # 通用参数：不包装为 batch_<timestamp> 结构，直接写入 target
@@ -172,12 +174,17 @@ def collect_pairs(source_dir: Path, recursive: bool = DEFAULT_RECURSIVE) -> list
 
 
 def read_labels(json_path: Path) -> list[str]:
-    """读取 JSON 里的所有 label（已去重保序）。失败时返回空列表。"""
+    """读取 JSON 里的所有 label（已去重保序）。失败时返回空列表。
+
+    解析失败会打印警告：坏标注若被静默当成「无标签」，会被归进 ``other``，
+    人工很难发现是数据损坏而不是真的没标。
+    """
     if not json_path.exists():
         return []
     try:
-        data = json.loads(json_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+        data = load_labelme(json_path)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[警告] 无法解析标注，按无标签处理：{json_path}（{e}）", file=sys.stderr)
         return []
     seen: set[str] = set()
     labels: list[str] = []
