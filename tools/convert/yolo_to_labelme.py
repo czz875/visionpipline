@@ -123,9 +123,17 @@ def convert_yolo_to_labelme(
 ) -> int:
     """批量转换 YOLO 标注为 LabelMe JSON。
 
+    标签目录或单张图的标签文件缺失时抛 ``FileNotFoundError``：静默当成空标注
+    会写出 shapes=0 的 JSON 并报告成功，下游拿到的是「全部无框」的数据。
+
+    空 txt（0 行）是合法的负样本，照常写成空 shapes。
+
     Returns:
         成功生成的 JSON 数量。
     """
+    if not labels_dir.is_dir():
+        raise FileNotFoundError(f"标签目录不存在：{labels_dir}")
+
     output_dir.mkdir(parents=True, exist_ok=True)
     images = list_images(images_dir)
     if not images:
@@ -135,6 +143,10 @@ def convert_yolo_to_labelme(
     generated = 0
     for image_path in images:
         label_path = labels_dir / f"{image_path.stem}.txt"
+        if not label_path.exists():
+            raise FileNotFoundError(
+                f"图片 {image_path.name} 的标签文件不存在：{label_path}"
+            )
         data = build_labelme_data(image_path, label_path, class_names)
         save_labelme(data, output_dir / f"{image_path.stem}.json")
         generated += 1
@@ -190,12 +202,16 @@ def main() -> int:
         print("[错误] 未解析到类别名称。")
         return 1
 
-    count = convert_yolo_to_labelme(
-        args.images.resolve(),
-        args.labels.resolve(),
-        class_names,
-        args.output.resolve(),
-    )
+    try:
+        count = convert_yolo_to_labelme(
+            args.images.resolve(),
+            args.labels.resolve(),
+            class_names,
+            args.output.resolve(),
+        )
+    except FileNotFoundError as e:
+        print(f"[错误] {e}")
+        return 1
     print(f"已生成 {count} 个 LabelMe JSON 到 {args.output}")
     return 0
 

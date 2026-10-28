@@ -46,8 +46,18 @@ DEFAULT_MAX_WORKERS = 12
 
 
 def _resolve_json_dir(json_dir: Path) -> Path:
-    """把逻辑标注目录解析为最新批次中的实际目录。"""
-    return resolve_latest_batch_stage_dir(json_dir)
+    """把逻辑标注目录解析为实际要处理的目录。
+
+    优先用逻辑目录自身：上游（如 ``supervision`` 模式）可能直接写逻辑目录而不落
+    批次子目录，此时若按「最新 batch_*」解析，会去处理**历史批次**、把新标注
+    整个跳过，却照常报告成功。
+
+    逻辑目录不存在或不含 JSON 时，才回退到最新批次目录（兼容按批次产出的流程）。
+    """
+    logical = Path(json_dir)
+    if logical.is_dir() and any(logical.rglob("*.json")):
+        return logical
+    return resolve_latest_batch_stage_dir(logical)
 
 
 def _build_parser() -> argparse.ArgumentParser:

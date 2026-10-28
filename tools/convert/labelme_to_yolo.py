@@ -145,6 +145,40 @@ def is_up_to_date(src: Path, dst: Path) -> bool:
     return dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime
 
 
+def class_table_signature(class_names: Iterable[str]) -> str:
+    """返回类别表的稳定指纹，用于判断标签是否可用当前类别表解释。
+
+    类别名顺序即 YOLO class id，因此顺序变化也必须视为「类别表变了」。
+    """
+    return ",".join(class_names)
+
+
+def read_class_table_signature(out_dir: Path) -> str | None:
+    """从 ``<out_dir>/data.yaml`` 读回上次转换用的类别表指纹。
+
+    Returns:
+        指纹字符串；data.yaml 不存在、无 names 或无法解析时返回 ``None``
+        （此时按「类别表未知」处理，触发重转，避免沿用无法验证的旧标签）。
+    """
+    yaml_path = out_dir / "data.yaml"
+    if not yaml_path.exists():
+        return None
+    try:
+        text = yaml_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("names:"):
+            continue
+        raw = line[len("names:"):].strip()
+        if raw.startswith("[") and raw.endswith("]"):
+            raw = raw[1:-1]
+        names = [n.strip().strip("'\"") for n in raw.split(",") if n.strip()]
+        return class_table_signature(names) if names else None
+    return None
+
+
 def resolve_image_size(data: dict, image_path: Path) -> tuple[int, int]:
     """取 LabelMe JSON 记录的图片尺寸；缺失或非法时回退到实际图片尺寸。
 
@@ -318,6 +352,19 @@ def process_batch(
     if not json_files:
         print(f"[{batch_name}] 没有 json，跳过")
         return []
+
+    # 增量跳过必须确认「旧标签能用当前类别表解释」。只比 mtime 会在换 --classes
+    # 后沿用旧 class id，而 data.yaml 被改写成新类别表 —— 标签与类别表整体错位，
+    # ultralytics 会把越界 id 的图判为 corrupt 整张丢弃，且不报错。
+    expected_sig = class_table_signature(class_names)
+    previous_sig = read_class_table_signature(out_dir)
+    if force or previous_sig != expected_sig:
+        if previous_sig is not None and previous_sig != expected_sig:
+            print(
+                f"[{batch_name}] 类别表已变更（{previous_sig} -> {expected_sig}），"
+                f"忽略增量跳过，全部重转"
+            )
+        force = True
 
     split_sets = split_files(json_files, seed=seed, ratios=ratios)
     assert len(split_sets) == len(splits), "splits 数量与 ratios 数量必须一致"

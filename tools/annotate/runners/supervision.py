@@ -196,6 +196,40 @@ def _export_labelme(dataset, output_dir: Path) -> None:
         )
 
 
+def _flatten_yolo_labels(labels_dir: Path, output: Path) -> None:
+    """把 ``labels/`` 下的标签平铺到 ``output`` 顶层。
+
+    ``yolo_to_labelme.py`` 按 ``<--labels>/<图片 stem>.txt`` 找标签；supervision
+    把标签写在 ``<output>/labels/`` 里，差一层目录会让回转拿到 0 个框却仍报告成功。
+    """
+    if not labels_dir.is_dir():
+        return
+    for txt in labels_dir.glob("*.txt"):
+        shutil.move(str(txt), str(output / txt.name))
+    try:
+        labels_dir.rmdir()
+    except OSError:
+        pass  # 仍有子目录或残留文件时保留，不强行删除
+
+
+def _rewrite_yolo_data_yaml(output: Path, class_names: list[str]) -> None:
+    """用可训练格式重写 data.yaml。
+
+    supervision 的 ``save_data_yaml`` 只写 ``nc`` / ``names``，缺 ``train`` / ``val``
+    时 ultralytics 直接报 ``'train:' key missing``。这里补上 ``path`` 与
+    指向图片目录的 ``train`` / ``val``。
+    """
+    images_dir = output / "images"
+    has_images = images_dir.is_dir() and any(images_dir.iterdir())
+    lines = [f"path: {output.resolve().as_posix()}"]
+    if has_images:
+        lines.append("train: images")
+        lines.append("val: images")
+    lines.append(f"nc: {len(class_names)}")
+    lines.append("names: [" + ", ".join(class_names) + "]")
+    (output / "data.yaml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def export_detection_dataset(
     dataset, output: Path, fmt: str, copy_images: bool
 ) -> None:
@@ -210,12 +244,15 @@ def export_detection_dataset(
     if fmt == "yolo":
         if copy_images:
             images_dir.mkdir(parents=True, exist_ok=True)
-        (output / "labels").mkdir(parents=True, exist_ok=True)
+        labels_dir = output / "labels"
+        labels_dir.mkdir(parents=True, exist_ok=True)
         dataset.as_yolo(
             images_directory_path=str(images_dir) if copy_images else None,
-            annotations_directory_path=str(output / "labels"),
+            annotations_directory_path=str(labels_dir),
             data_yaml_path=str(output / "data.yaml"),
         )
+        _flatten_yolo_labels(labels_dir, output)
+        _rewrite_yolo_data_yaml(output, dataset.classes)
     elif fmt == "labelme":
         # LabelMe 图片与 JSON 同目录，且要求 basename 唯一。当前环境
         # supervision 未提供 labelme 导出模块（见 AGENTS.md §6），改用
