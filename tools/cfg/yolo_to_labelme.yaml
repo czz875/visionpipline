@@ -4,12 +4,19 @@
 # 用法：
 #   python tools/workflow.py --config tools/cfg/yolo_to_labelme.yaml --dry-run
 #   python tools/workflow.py --config tools/cfg/yolo_to_labelme.yaml
+#
+# 类别表从某个实际存在的批次 data.yaml 读取；各批次 names 一致（见
+# parameters.yolo_classes_ref），改类别时只需改这一处。
 
 paths:
   remaining: datasets/02_remaining_70
   self_annotated_labels: datasets/04_self_annotated_labels
   labelme_final: datasets/05_labelme_final
   yolo: datasets/yolo
+
+parameters:
+  # 读取类别名的批次 data.yaml；磁盘上按 0001..0155 组织，没有 all/ 汇总目录。
+  yolo_classes_ref: datasets/yolo/0001/data.yaml
 
 stages_only:
   - convert_back_labelme
@@ -20,5 +27,5 @@ stages:
       python tools/convert/yolo_to_labelme.py
       --images ${paths.remaining}
       --labels ${paths.self_annotated_labels}
-      --classes ${paths.yolo}/all/data.yaml
+      --classes ${parameters.yolo_classes_ref}
       --output ${paths.labelme_final}
