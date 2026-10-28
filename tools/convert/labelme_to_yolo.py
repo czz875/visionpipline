@@ -1,11 +1,13 @@
-"""
+r"""
 tools/convert/labelme_to_yolo.py
 把 LabelMe 标注批量转换为 YOLO 格式，支持多 batch 划分与增量更新。
 
 实现要点（按 AGENTS.md §4.3 优先调用官方库）：
 - 标签解析与归一化：``tools.core.labelme.labelme_dict_to_detections``（sv.Detections）；
 - 写出 YOLO txt：``supervision.dataset.formats.yolo.detections_to_yolo_annotations``；
-- 写 data.yaml：``supervision.dataset.formats.yolo.save_data_yaml``；
+- 写 data.yaml：本项目自行写出 ``path`` / ``train`` / ``val`` / ``nc`` / ``names``
+  （supervision 0.29.1 的 ``save_data_yaml`` 只写 ``nc`` / ``names``，缺
+  ``train`` / ``val`` 时 ultralytics 无法加载数据集）；
 - 自身只负责：batch 发现、train/val 划分、图片复制或硬链接、增量跳过。
 
 典型用法：
@@ -38,12 +40,15 @@ from typing import Iterable
 if __name__ == "__main__" and __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from supervision.dataset.formats.yolo import (
-    detections_to_yolo_annotations,
-    save_data_yaml,
-)
+from PIL import Image
+from supervision.dataset.formats.yolo import detections_to_yolo_annotations
 
-from tools.core import labelme_dict_to_detections, load_labelme
+from tools.core import (
+    IMAGE_EXTENSIONS,
+    labelme_dict_to_detections,
+    load_labelme,
+    unregistered_labels,
+)
 
 
 # =============================================================================
@@ -59,7 +64,7 @@ DEFAULT_RATIOS: tuple[float, ...] = (0.9, 0.1)
 DEFAULT_SEED = 3407
 DEFAULT_FORCE = False
 DEFAULT_HARDLINK_IMAGES = False
-DEFAULT_IMAGE_SUFFIXES: tuple[str, ...] = (".png", ".jpg", ".jpeg")
+DEFAULT_IMAGE_SUFFIXES: tuple[str, ...] = tuple(sorted(IMAGE_EXTENSIONS))
 
 # 批次子目录命名：4 位数字（如 0001/、0002/）。不在此格式内的子目录会被忽略。
 BATCH_DIR_RE = re.compile(r"^\d{4}$")
@@ -99,6 +104,7 @@ def split_files(
     seed: int = DEFAULT_SEED,
     ratios: Iterable[float] = DEFAULT_RATIOS,
 ) -> list[list[Path]]:
+    """按 ``ratios`` 把文件随机划分为若干组，``seed`` 固定则结果可复现。"""
     shuffled = files[:]
     random.Random(seed).shuffle(shuffled)
     total = len(shuffled)
@@ -139,19 +145,61 @@ def is_up_to_date(src: Path, dst: Path) -> bool:
     return dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime
 
 
+def resolve_image_size(data: dict, image_path: Path) -> tuple[int, int]:
+    """取 LabelMe JSON 记录的图片尺寸；缺失或非法时回退到实际图片尺寸。
+
+    LabelMe 偶尔写出没有 ``imageWidth`` / ``imageHeight`` 的 JSON。若直接按 1 处理，
+    YOLO 归一化坐标会整体放大到图片之外，因此这里必须回退到真实尺寸。
+
+    Raises:
+        ValueError: JSON 与图片都拿不到有效尺寸。
+    """
+    try:
+        width = int(data.get("imageWidth"))
+        height = int(data.get("imageHeight"))
+    except (TypeError, ValueError):
+        width = height = 0
+    if width > 0 and height > 0:
+        return width, height
+    try:
+        with Image.open(image_path) as img:
+            real_width, real_height = img.size
+    except OSError as e:
+        raise ValueError(f"无法确定图片尺寸（JSON 未记录且读取失败）：{image_path}") from e
+    if real_width <= 0 or real_height <= 0:
+        raise ValueError(f"图片尺寸非法：{image_path}")
+    return real_width, real_height
+
+
 def convert_labelme_to_yolo(
     json_path: Path,
     output_path: Path,
     *,
     class_names: list[str],
-) -> None:
-    """把单个 LabelMe JSON 转成 YOLO txt（核心走 supervision）。"""
+    image_path: Path | None = None,
+) -> list[str]:
+    """把单个 LabelMe JSON 转成 YOLO txt（核心走 supervision）。
+
+    Args:
+        json_path: LabelMe JSON 路径。
+        output_path: 目标 YOLO txt 路径。
+        class_names: 类别名列表，顺序即 YOLO 类别 id。
+        image_path: 对应图片路径；未给出时按同目录同名规则查找，用于回退读取尺寸。
+
+    Returns:
+        该 JSON 中未注册、因此被丢弃的标签名列表（空列表表示全部保留）。
+    """
     data = load_labelme(json_path)
-    image_w = int(data.get("imageWidth", 1))
-    image_h = int(data.get("imageHeight", 1))
+    if image_path is None:
+        image_path = find_image_path(json_path)
+    image_w, image_h = resolve_image_size(data, image_path)
     class_name_to_id = {name: idx for idx, name in enumerate(class_names)}
 
-    detections = labelme_dict_to_detections(data, class_name_to_id=class_name_to_id)
+    detections = labelme_dict_to_detections(
+        data,
+        class_name_to_id=class_name_to_id,
+        image_size=(image_w, image_h),
+    )
     if len(detections) == 0:
         lines: list[str] = []
     else:
@@ -164,6 +212,7 @@ def convert_labelme_to_yolo(
     output_path.write_text(
         "\n".join(lines) + ("\n" if lines else ""), encoding="utf-8"
     )
+    return unregistered_labels(data, class_name_to_id)
 
 
 def copy_image_to_split(
@@ -201,20 +250,38 @@ def copy_image_to_split(
 
 
 def write_split_list(
-    out_dir: Path, split_name: str, json_files: Iterable[Path]
+    out_dir: Path, split_name: str, image_names: Iterable[str]
 ) -> None:
-    """写 <out_dir>/<split_name>.txt，路径相对 out_dir（YOLO 标准）。"""
+    """写 <out_dir>/<split_name>.txt 图片列表。
+
+    每行写成 ``./images/<split>/<name>``。ultralytics 的 ``get_img_files`` 只在行首为
+    ``./`` 时才按列表文件所在目录解析，否则会当作相对当前工作目录的路径，导致
+    ``No labels found``。
+    """
     list_path = out_dir / f"{split_name}.txt"
-    rel_paths: list[str] = []
-    for json_path in json_files:
-        image_path = find_image_path(json_path)
-        rel_paths.append(f"images/{split_name}/{image_path.name}")
+    rel_paths = [f"./images/{split_name}/{name}" for name in image_names]
     list_path.write_text("\n".join(rel_paths) + "\n", encoding="utf-8")
 
 
-def write_data_yaml(out_dir: Path, class_names: list[str]) -> None:
-    """写 <out_dir>/data.yaml（train/val 路径相对 out_dir）——走 supervision。"""
-    save_data_yaml(str(out_dir / "data.yaml"), list(class_names))
+def write_data_yaml(out_dir: Path, class_names: list[str], splits: Iterable[str] = DEFAULT_SPLITS) -> None:
+    """写 <out_dir>/data.yaml。
+
+    ``path`` 用绝对路径（含中文/空格的仓库路径也能被 ultralytics 解析），
+    ``train`` / ``val`` 指向同目录的 ``<split>.txt`` 列表文件。
+
+    不复用 ``supervision.save_data_yaml``：它只写 ``nc`` / ``names``，缺少
+    ``train`` / ``val`` 时 ``yolo detect train data=...`` 会直接报错。
+    """
+    splits = list(splits)
+    lines = [
+        f"path: {out_dir.resolve().as_posix()}",
+        f"train: {splits[0]}.txt",
+    ]
+    if len(splits) > 1:
+        lines.append(f"val: {splits[1]}.txt")
+    lines.append(f"nc: {len(class_names)}")
+    lines.append("names: [" + ", ".join(class_names) + "]")
+    (out_dir / "data.yaml").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 # =============================================================================
@@ -229,13 +296,17 @@ def process_batch(
     seed: int,
     class_names: list[str],
     splits: tuple[str, ...] = DEFAULT_SPLITS,
+    ratios: Iterable[float] = DEFAULT_RATIOS,
     force: bool = DEFAULT_FORCE,
     hardlink_images: bool = DEFAULT_HARDLINK_IMAGES,
-) -> None:
+) -> list[str]:
     """处理单个 batch：划分 + 转标签 + 输出图片 + 写 train/val 列表 + 写 data.yaml。
 
     若目标 label 与 image 均已存在且比源文件新，则默认跳过，以加速增量转换。
     可通过 force=True 强制全部重新转换。
+
+    Returns:
+        本 batch 中被丢弃的未注册标签名（去重后），供调用方汇总报告。
     """
     label_dir = out_dir / "labels"
     image_dir = out_dir / "images"
@@ -246,17 +317,20 @@ def process_batch(
 
     if not json_files:
         print(f"[{batch_name}] 没有 json，跳过")
-        return
+        return []
 
-    split_sets = split_files(json_files, seed=seed)
+    split_sets = split_files(json_files, seed=seed, ratios=ratios)
     assert len(split_sets) == len(splits), "splits 数量与 ratios 数量必须一致"
 
     converted = 0
     skipped = 0
+    dropped: dict[str, None] = {}
     for split_name, split_group in zip(splits, split_sets):
+        image_names: list[str] = []
         for json_path in split_group:
             stem = json_path.stem
             image_path = find_image_path(json_path)
+            image_names.append(image_path.name)
             label_path = label_dir / split_name / f"{stem}.txt"
             dest_image_path = image_dir / split_name / image_path.name
 
@@ -272,7 +346,10 @@ def process_batch(
                 skipped += 1
                 continue
 
-            convert_labelme_to_yolo(json_path, label_path, class_names=class_names)
+            for label in convert_labelme_to_yolo(
+                json_path, label_path, class_names=class_names, image_path=image_path
+            ):
+                dropped.setdefault(label, None)
             copy_image_to_split(
                 image_path,
                 split_name,
@@ -280,14 +357,20 @@ def process_batch(
                 hardlink=hardlink_images,
             )
             converted += 1
-        write_split_list(out_dir, split_name, split_group)
+        write_split_list(out_dir, split_name, image_names)
 
-    write_data_yaml(out_dir, class_names)
+    write_data_yaml(out_dir, class_names, splits)
     print(f"[{batch_name}] 共 {len(json_files)} 个 -> {out_dir}")
     print(f"  - 新转换: {converted} 个")
     print(f"  - 已存在跳过: {skipped} 个")
     for split_name, split_group in zip(splits, split_sets):
-            print(f"  - {split_name}: {len(split_group)} images")
+        print(f"  - {split_name}: {len(split_group)} images")
+    if dropped:
+        print(
+            f"  [警告] {len(dropped)} 个标签未在类别表中，已丢弃："
+            f"{', '.join(dropped)}"
+        )
+    return list(dropped)
 
 
 def convert_to_yolo(
@@ -296,6 +379,7 @@ def convert_to_yolo(
     *,
     class_names: list[str],
     seed: int = DEFAULT_SEED,
+    ratios: Iterable[float] = DEFAULT_RATIOS,
     force: bool = DEFAULT_FORCE,
     hardlink_images: bool = DEFAULT_HARDLINK_IMAGES,
     dry_run: bool = False,
@@ -304,6 +388,7 @@ def convert_to_yolo(
 
     ``hardlink_images=True`` 时以硬链接代替复制图片；默认保持复制行为。
     ``dry_run=True`` 时只 print 计划，不写盘。
+    ``ratios`` 为各 split 的划分比例，顺序对应 ``DEFAULT_SPLITS``。
     """
     src = src.resolve()
     out_root = out.resolve()
@@ -314,30 +399,49 @@ def convert_to_yolo(
     if not batches:
         raise FileNotFoundError(f"在 {src} 下未找到任何 JSON 标注文件。")
 
+    ratios = list(ratios)
+    if len(ratios) != len(DEFAULT_SPLITS):
+        raise ValueError(
+            f"ratios 数量必须为 {len(DEFAULT_SPLITS)}（对应 {DEFAULT_SPLITS}），"
+            f"当前为 {len(ratios)}：{ratios}"
+        )
+
     print(f"源目录    ：{src}")
     print(f"输出根目录：{out_root}")
     print(f"类别      ：{class_names}")
+    print(f"划分比例  ：{dict(zip(DEFAULT_SPLITS, ratios))}，seed={seed}")
     print(f"检测到 {len(batches)} 个 batch：{', '.join(batches.keys())}")
 
     if dry_run:
         return
 
+    all_dropped: dict[str, None] = {}
     for batch_idx, (batch_name, json_files) in enumerate(batches.items()):
         batch_out = out_root / batch_name
-        # "all" 虚拟 batch 用 SEED；其他 batch 用 SEED + idx 偏移
-        seed = DEFAULT_SEED if batch_name == "all" else DEFAULT_SEED + batch_idx
-        process_batch(
+        # 各 batch 用 seed + idx 偏移，保证不同 batch 的划分互不相同但可复现。
+        batch_seed = seed + batch_idx
+        dropped = process_batch(
             batch_name,
             json_files,
             batch_out,
-            seed=seed,
+            seed=batch_seed,
             class_names=class_names,
+            ratios=ratios,
             force=force,
             hardlink_images=hardlink_images,
         )
+        for label in dropped:
+            all_dropped.setdefault(label, None)
 
     # 顶层写一个 names.txt 方便查看
     (out_root / "names.txt").write_text("\n".join(class_names) + "\n", encoding="utf-8")
+
+    if all_dropped:
+        print(
+            f"\n[警告] 以下 {len(all_dropped)} 个标签未在 --classes 中注册，"
+            f"对应标注已被丢弃：{', '.join(all_dropped)}\n"
+            f"       如属漏配，请把类别补进 --classes 后重跑。"
+        )
 
 
 # =============================================================================
@@ -377,6 +481,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"随机种子（默认 {DEFAULT_SEED}）。",
     )
     parser.add_argument(
+        "--ratios",
+        type=str,
+        default=",".join(str(r) for r in DEFAULT_RATIOS),
+        help=(
+            "train/val 划分比例（逗号分隔，顺序对应 train,val）。"
+            f"默认：{','.join(str(r) for r in DEFAULT_RATIOS)}"
+        ),
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="强制重新转换所有文件，不跳过已存在的输出。",
@@ -393,19 +506,39 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def parse_ratios(text: str) -> list[float]:
+    """把 ``"0.9,0.1"`` 解析成 ``[0.9, 0.1]`` 并校验数量与总和。"""
+    ratios = [float(x) for x in text.split(",") if x.strip()]
+    if len(ratios) != len(DEFAULT_SPLITS):
+        raise ValueError(
+            f"--ratios 需要 {len(DEFAULT_SPLITS)} 个值（train,val），当前：{text}"
+        )
+    if any(r <= 0 for r in ratios):
+        raise ValueError(f"--ratios 必须为正数，当前：{text}")
+    if abs(sum(ratios) - 1.0) > 1e-6:
+        raise ValueError(f"--ratios 之和必须为 1，当前：{text}（合计 {sum(ratios)}）")
+    return ratios
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     class_names = [c.strip() for c in args.classes.split(",") if c.strip()]
+    if not class_names:
+        print("[错误] --classes 不能为空。")
+        return 1
     try:
+        ratios = parse_ratios(args.ratios)
         convert_to_yolo(
             args.src,
             args.out,
             class_names=class_names,
+            seed=args.seed,
+            ratios=ratios,
             force=args.force,
             hardlink_images=args.hardlink_images,
         )
-    except (FileNotFoundError, OSError) as e:
+    except (FileNotFoundError, OSError, ValueError) as e:
         print(f"[错误] {e}")
         return 1
     return 0

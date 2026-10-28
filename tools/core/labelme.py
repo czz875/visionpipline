@@ -116,17 +116,21 @@ def save_labelme(
 def labelme_dict_to_detections(
     labelme_data: dict,
     class_name_to_id: dict[str, int],
+    *,
+    image_size: tuple[int, int] | None = None,
 ) -> sv.Detections:
     """把单个 LabelMe JSON dict 转成 ``supervision.Detections``。
 
     规则：
     - 只保留 ``shape_type == "rectangle"`` 的形状；
     - 跳过未在 ``class_name_to_id`` 中注册的 label（避免出现未知类别）；
-    - 自动把两点矩形归一化（允许 ``[[x1,y1],[x2,y2]]`` 或 ``[[x2,y2],[x1,y1]]``）。
+    - 自动把两点矩形归一化（允许 ``[[x1,y1],[x2,y2]]`` 或 ``[[x2,y2],[x1,y1]]``）；
+    - 传入 ``image_size`` 时把框裁剪到图片范围内，避免生成越界 YOLO 标签。
 
     Args:
         labelme_data: ``load_labelme`` 读出的字典。
         class_name_to_id: 类别名 → YOLO 类别 id 的映射。
+        image_size: 图片尺寸 ``(width, height)``；为 ``None`` 时不裁剪。
 
     Returns:
         ``supervision.Detections``；当无可用形状时返回 ``Detections.empty()``。
@@ -135,6 +139,8 @@ def labelme_dict_to_detections(
 
     xyxy_list: list[list[float]] = []
     class_id_list: list[int] = []
+    max_w = float(image_size[0]) if image_size else None
+    max_h = float(image_size[1]) if image_size else None
 
     for shape in labelme_data.get("shapes", []):
         if shape.get("shape_type") != "rectangle":
@@ -149,6 +155,12 @@ def labelme_dict_to_detections(
         x2, y2 = float(points[1][0]), float(points[1][1])
         x_min, x_max = (x1, x2) if x1 <= x2 else (x2, x1)
         y_min, y_max = (y1, y2) if y1 <= y2 else (y2, y1)
+        if max_w is not None:
+            x_min, x_max = max(0.0, min(x_min, max_w)), max(0.0, min(x_max, max_w))
+        if max_h is not None:
+            y_min, y_max = max(0.0, min(y_min, max_h)), max(0.0, min(y_max, max_h))
+        if x_max <= x_min or y_max <= y_min:
+            continue
         xyxy_list.append([x_min, y_min, x_max, y_max])
         class_id_list.append(class_name_to_id[label])
 
@@ -158,6 +170,25 @@ def labelme_dict_to_detections(
         xyxy=np.array(xyxy_list, dtype=np.float32),
         class_id=np.array(class_id_list, dtype=int),
     )
+
+
+def unregistered_labels(
+    labelme_data: dict,
+    class_name_to_id: dict[str, int],
+) -> list[str]:
+    """返回 JSON 中未在类别表注册的矩形标签（去重、按出现顺序）。
+
+    用于在转换时报告被丢弃的标注，避免类别表漏配导致标注静默消失。
+    """
+    seen: dict[str, None] = {}
+    for shape in labelme_data.get("shapes", []):
+        if shape.get("shape_type") != "rectangle":
+            continue
+        label = shape.get("label", "")
+        if label and label not in class_name_to_id:
+            seen.setdefault(label, None)
+    return list(seen)
+
 
 
 def detections_to_labelme_dict(

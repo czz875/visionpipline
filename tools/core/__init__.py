@@ -36,6 +36,7 @@ from tools.core.labelme import (
     list_labelme_files,
     load_labelme,
     save_labelme,
+    unregistered_labels,
 )
 
 __all__ = [
@@ -58,5 +59,6 @@ __all__ = [
     "rect_to_xyxy",
     "resolve_latest_batch_stage_dir",
     "save_labelme",
+    "unregistered_labels",
     "xyxy_to_points",
 ]

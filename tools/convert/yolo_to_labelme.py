@@ -1,4 +1,4 @@
-"""
+r"""
 tools/convert/yolo_to_labelme.py
 把 YOLO txt 标注批量转回 LabelMe JSON。
 
@@ -40,26 +40,34 @@ from tools.core import (
 
 
 # =============================================================================
-# 1. 默认参数
-# =============================================================================
-
-DEFAULT_IMAGE_SUFFIXES: tuple[str, ...] = (".png", ".jpg", ".jpeg")
-
-
-# =============================================================================
-# 2. 类别解析
+# 1. 类别解析
 # =============================================================================
 
 
 def parse_classes(classes_arg: str) -> list[str]:
-    """解析类别参数：逗号分隔字符串，或从 YAML 的 names 字段读取。"""
+    """解析类别参数：逗号分隔字符串，或从 YAML 的 names 字段读取。
+
+    ``classes_arg`` 形似 YAML 路径（以 ``.yaml`` / ``.yml`` 结尾）但文件不存在时
+    直接抛 ``FileNotFoundError``：若静默当成类名字符串，会把路径本身写成类别名，
+    只保留 class_id 0，其余类别的标注全部丢失。
+
+    Raises:
+        FileNotFoundError: 传入的是 YAML 路径但文件不存在。
+        ValueError: YAML 内没有可用的 ``names`` 字段。
+    """
+    looks_like_yaml = Path(classes_arg).suffix.lower() in (".yaml", ".yml")
     path = Path(classes_arg)
-    if path.is_file() and path.suffix in (".yaml", ".yml"):
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if looks_like_yaml and not path.is_file():
+        raise FileNotFoundError(f"类别 YAML 不存在：{classes_arg}")
+    if path.is_file() and looks_like_yaml:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         names = data.get("names", [])
         if isinstance(names, dict):
-            names = [names[k] for k in sorted(names)]
-        return list(names)
+            names = [names[k] for k in sorted(names, key=lambda x: int(x))]
+        names = [str(n) for n in names]
+        if not names:
+            raise ValueError(f"类别 YAML 中没有 names 字段：{classes_arg}")
+        return names
 
     return [c.strip() for c in classes_arg.split(",") if c.strip()]
 
@@ -173,7 +181,11 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
-    class_names = parse_classes(args.classes)
+    try:
+        class_names = parse_classes(args.classes)
+    except (FileNotFoundError, ValueError, yaml.YAMLError) as e:
+        print(f"[错误] {e}")
+        return 1
     if not class_names:
         print("[错误] 未解析到类别名称。")
         return 1
