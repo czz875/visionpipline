@@ -11,8 +11,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from tools.annotate.defaults import (
-    DEFAULT_CLASSES,
+from tools.annotate.defaults import (    DEFAULT_CLASSES,
     DEFAULT_CONF,
     DEFAULT_COPY_IMAGES,
     DEFAULT_DETR_MODEL,
@@ -45,6 +44,21 @@ from tools.annotate.defaults import (
     DEFAULT_SAM3_MODEL,
     DEFAULT_VERBOSE,
 )
+
+
+def _positive_int(text: str) -> int:
+    """argparse 类型：必须是 >= 1 的整数。
+
+    用于马赛克块大小等会参与整数除法的参数，避免运行到中途才抛
+    ``ZeroDivisionError``。
+    """
+    try:
+        value = int(text)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError(f"需要一个整数，收到：{text!r}")
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"必须 >= 1，收到：{value}")
+    return value
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -229,8 +243,8 @@ def build_parser() -> argparse.ArgumentParser:
              "留空则对所有类别生效。",
     )
     parser.add_argument(
-        "--mosaic-block", type=int, default=DEFAULT_MOSAIC_BLOCK,
-        help=f"马赛克块大小（像素），越大越糊（默认：{DEFAULT_MOSAIC_BLOCK}）。",
+        "--mosaic-block", type=_positive_int, default=DEFAULT_MOSAIC_BLOCK,
+        help=f"马赛克块大小（像素），必须 >= 1，越大越糊（默认：{DEFAULT_MOSAIC_BLOCK}）。",
     )
 
     parser.add_argument(

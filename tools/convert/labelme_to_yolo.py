@@ -503,6 +503,13 @@ def convert_to_yolo(
     batches = discover_batches(src)
     if not batches:
         raise FileNotFoundError(f"在 {src} 下未找到任何 JSON 标注文件。")
+    # discover_batches 对存在的目录总会返回条目（平铺模式返回 {"all": [...]}），
+    # 因此必须按实际 JSON 数量判断，否则空目录会一路走到「成功」却不产 data.yaml。
+    total_json = sum(len(files) for files in batches.values())
+    if total_json == 0:
+        raise FileNotFoundError(
+            f"在 {src} 下未找到任何 JSON 标注文件（检查目录结构与 4 位数字批次命名）。"
+        )
 
     ratios = list(ratios)
     if len(ratios) != len(DEFAULT_SPLITS):

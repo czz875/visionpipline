@@ -135,7 +135,13 @@ def mosaic_region(
 
     只处理框内像素；框外与重叠部分由调用方通过 ``box`` 预先扣减好，
     本函数不关心重叠逻辑。
+
+    Raises:
+        ValueError: ``block_size`` 小于 1。原先是整数除零的
+            ``ZeroDivisionError``，对调用方来说既难定位也难处理。
     """
+    if block_size < 1:
+        raise ValueError(f"mosaic block_size 必须 >= 1，当前为 {block_size}")
     clipped = clip_box(box, image.shape)
     x1, y1, x2, y2 = (int(round(v)) for v in clipped.tolist())
     if x2 <= x1 or y2 <= y1:
