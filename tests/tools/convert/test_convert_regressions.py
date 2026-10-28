@@ -75,7 +75,10 @@ def test_out_of_bounds_points_are_clipped(tmp_path: Path) -> None:
 
 
 def test_fully_out_of_bounds_box_is_dropped(tmp_path: Path) -> None:
-    """完全落在图片外的框裁剪后为空，应被丢弃而不是写成零面积标签。"""
+    """完全落在图片外的框裁剪后为空，应被丢弃而不是写成零面积标签。
+
+    源图有框但一条都没保留，不能写空标签文件：那会让该图被当作无目标负样本。
+    """
     json_path = tmp_path / "a.json"
     image_path = tmp_path / "a.png"
     _write_sample(json_path, image_path, points=[[200, 200], [300, 300]])
@@ -83,11 +86,14 @@ def test_fully_out_of_bounds_box_is_dropped(tmp_path: Path) -> None:
 
     convert_labelme_to_yolo(json_path, label_path, class_names=["phone"])
 
-    assert label_path.read_text(encoding="utf-8").strip() == ""
+    assert not label_path.exists(), "标注全丢时不该写出空标签文件"
 
 
 def test_unregistered_labels_are_reported(tmp_path: Path) -> None:
-    """未注册标签要作为返回值上报，供调用方汇总警告。"""
+    """未注册标签要作为返回值上报，供调用方汇总警告。
+
+    该图没有可保留的框，因此不写标签文件（避免伪造负样本）。
+    """
     json_path = tmp_path / "a.json"
     image_path = tmp_path / "a.png"
     _write_sample(json_path, image_path, label="helmet")
@@ -96,7 +102,7 @@ def test_unregistered_labels_are_reported(tmp_path: Path) -> None:
     dropped = convert_labelme_to_yolo(json_path, label_path, class_names=["phone"])
 
     assert dropped == ["helmet"]
-    assert label_path.read_text(encoding="utf-8").strip() == ""
+    assert not label_path.exists(), "标注全丢时不该写出空标签文件"
 
 
 def test_process_batch_writes_trainable_data_yaml(tmp_path: Path) -> None:

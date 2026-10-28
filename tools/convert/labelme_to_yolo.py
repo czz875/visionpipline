@@ -214,6 +214,10 @@ def convert_labelme_to_yolo(
 ) -> list[str]:
     """把单个 LabelMe JSON 转成 YOLO txt（核心走 supervision）。
 
+    全部标注都未注册时**不写**标签文件：写空 txt 会让 ultralytics 判 ``ne=1``，
+    该图仍进训练集并被当成「这里没有目标」，等于主动训练错误的负样本。
+    原本就没有标注的图是真实负样本，照常写空文件。
+
     Args:
         json_path: LabelMe JSON 路径。
         output_path: 目标 YOLO txt 路径。
@@ -222,6 +226,7 @@ def convert_labelme_to_yolo(
 
     Returns:
         该 JSON 中未注册、因此被丢弃的标签名列表（空列表表示全部保留）。
+        调用方可用 ``output_path.exists()`` 判断是否真的写出了标签。
     """
     data = load_labelme(json_path)
     if image_path is None:
@@ -242,11 +247,20 @@ def convert_labelme_to_yolo(
             detections, image_shape=(image_h, image_w, 3)
         )
 
+    dropped = unregistered_labels(data, class_name_to_id)
+    had_shapes = any(
+        shape.get("shape_type") == "rectangle" for shape in data.get("shapes", [])
+    )
+    if not lines and had_shapes:
+        # 源图有标注但一条都没保留：不写文件，避免伪造负样本。
+        output_path.unlink(missing_ok=True)
+        return dropped
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
         "\n".join(lines) + ("\n" if lines else ""), encoding="utf-8"
     )
-    return unregistered_labels(data, class_name_to_id)
+    return dropped
 
 
 def copy_image_to_split(
@@ -372,12 +386,12 @@ def process_batch(
     converted = 0
     skipped = 0
     dropped: dict[str, None] = {}
+    unlabeled: list[str] = []
     for split_name, split_group in zip(splits, split_sets):
         image_names: list[str] = []
         for json_path in split_group:
             stem = json_path.stem
             image_path = find_image_path(json_path)
-            image_names.append(image_path.name)
             label_path = label_dir / split_name / f"{stem}.txt"
             dest_image_path = image_dir / split_name / image_path.name
 
@@ -390,6 +404,7 @@ def process_batch(
                     or image_path.samefile(dest_image_path)
                 )
             ):
+                image_names.append(image_path.name)
                 skipped += 1
                 continue
 
@@ -397,6 +412,14 @@ def process_batch(
                 json_path, label_path, class_names=class_names, image_path=image_path
             ):
                 dropped.setdefault(label, None)
+
+            if not label_path.exists():
+                # 标注全被丢弃：不复制图片、不进 train/val 列表，避免成为负样本。
+                unlabeled.append(image_path.name)
+                dest_image_path.unlink(missing_ok=True)
+                continue
+
+            image_names.append(image_path.name)
             copy_image_to_split(
                 image_path,
                 split_name,
@@ -416,6 +439,12 @@ def process_batch(
         print(
             f"  [警告] {len(dropped)} 个标签未在类别表中，已丢弃："
             f"{', '.join(dropped)}"
+        )
+    if unlabeled:
+        print(
+            f"  [警告] {len(unlabeled)} 张图的标注全部未注册，已排除出数据集"
+            f"（避免当作负样本）：{', '.join(unlabeled[:5])}"
+            f"{' ...' if len(unlabeled) > 5 else ''}"
         )
     return list(dropped)
 
