@@ -39,7 +39,7 @@ def parse_class_ids(
 ) -> set[int] | None:
     """将 ``--classes`` 字符串解析为类别 ID 集合。
 
-    支持 ``0,2,3`` 与 ``person,car`` 两种形式；未知名称打印警告但不中断。
+    支持 ``0,2,3`` 与 ``person,car`` 两种形式。
 
     Args:
         arg: ``--classes`` 参数原文。
@@ -48,6 +48,11 @@ def parse_class_ids(
 
     Returns:
         类别 ID 集合；``None`` 表示不过滤。
+
+    Raises:
+        ValueError: 存在无法识别的类别名。静默忽略会让 ``--classes fac``
+            退化成「不过滤」，把不该标注的类别一并写进结果，而用户以为
+            过滤已生效 —— 与 ultralytics 原生语义相反。
     """
     if not arg:
         return None
@@ -60,6 +65,7 @@ def parse_class_ids(
         pairs = list(enumerate(model_names))
     ids: set[int] = set()
     name_to_id = {str(name).lower(): int(idx) for idx, name in pairs}
+    unknown: list[str] = []
     for it in items:
         if it.isdigit():
             ids.add(int(it))
@@ -68,7 +74,12 @@ def parse_class_ids(
         if mapped is not None:
             ids.add(mapped)
         else:
-            print(f"[警告] 未识别的类别：{it}", file=sys.stderr)
+            unknown.append(it)
+    if unknown:
+        available = ", ".join(str(name) for _, name in pairs)
+        raise ValueError(
+            f"未识别的类别：{'、'.join(unknown)}。可用类别：{available}"
+        )
     return ids or None
 
 
@@ -103,19 +114,38 @@ def build_detection_dataset(
     """逐张图推理并累积为 ``sv.DetectionDataset``。
 
     无检测结果的图仍保留为空的 ``Detections``，确保图像集合完整。
+    单张图推理失败（损坏、截断、无法解码）时跳过该图并计数，不中断整批：
+    ultralytics 对坏图会返回空结果列表，直接取 ``[0]`` 会抛 IndexError，
+    让已推理成功的图片全部白跑。
     """
     import supervision as sv
 
     annotations: dict[str, sv.Detections] = {}
     image_paths: list[str] = []
+    failed: list[tuple[Path, str]] = []
     for img_path in tqdm(images, desc="推理中"):
-        detections = labeler.predict(img_path)
+        try:
+            detections = labeler.predict(img_path)
+        except Exception as e:  # 单图失败不应终止整批
+            failed.append((img_path, f"{type(e).__name__}: {e}"))
+            continue
         detections = filter_by_class_ids(detections, keep_class_ids)
         detections = filter_by_confidence(detections, min_confidence)
         key = str(img_path.resolve())
         image_paths.append(key)
         # 即便为空也写入，保证导出时图像集合完整。
         annotations[key] = detections if len(detections) else sv.Detections.empty()
+
+    if failed:
+        print(
+            f"[警告] {len(failed)} 张图片推理失败，已跳过：",
+            file=sys.stderr,
+        )
+        for path, reason in failed[:5]:
+            print(f"    {path.name}: {reason}", file=sys.stderr)
+        if len(failed) > 5:
+            print(f"    ... 另有 {len(failed) - 5} 张", file=sys.stderr)
+
     return sv.DetectionDataset(
         classes=labeler.classes, images=image_paths, annotations=annotations
     )
@@ -317,13 +347,33 @@ def run_supervision(args) -> int:
         return 1
 
     labeler = _build_labeler(args)
-    keep_class_ids = parse_class_ids(args.classes, labeler.classes)
+    try:
+        keep_class_ids = parse_class_ids(args.classes, labeler.classes)
+    except ValueError as e:
+        print(f"[错误] {e}", file=sys.stderr)
+        return 1
+
+    if getattr(args, "dry_run", False):
+        # 与 onnx / mosaic / multi 保持一致：默认只预览，加 --apply 才写盘。
+        names = (
+            ", ".join(labeler.classes[i] for i in sorted(keep_class_ids))
+            if keep_class_ids is not None
+            else "全部类别"
+        )
+        print(f"[预览] 待标注 {len(images)} 张图片，类别：{names}")
+        print(f"[预览] 输出目录：{args.output}（格式 {args.format}）")
+        print("[预览] 未写盘；确认无误请加 --apply。")
+        return 0
+
     dataset = build_detection_dataset(
         labeler,
         images,
         keep_class_ids,
         args.min_confidence,
     )
+    if len(dataset) == 0:
+        print("[错误] 所有图片推理失败，未产出任何标注。", file=sys.stderr)
+        return 1
     export_detection_dataset(
         dataset,
         Path(args.output),

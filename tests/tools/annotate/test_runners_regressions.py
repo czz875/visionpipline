@@ -24,10 +24,16 @@ def test_parse_class_ids_returns_none_when_unfiltered() -> None:
     assert parse_class_ids("", ["person"]) is None
 
 
-def test_parse_class_ids_ignores_unknown_names(capsys) -> None:
-    result = parse_class_ids("person,unknown", ["person"])
-    assert result == {0}
-    assert "未识别的类别" in capsys.readouterr().err
+def test_parse_class_ids_rejects_unknown_names() -> None:
+    """拼错的类别名必须报错。
+
+    原先只打印警告并返回 {0}，``--classes fac``（拼错）会退化成「不过滤」，
+    把不该标注的类别一并写进结果，而用户以为过滤已生效。
+    """
+    import pytest
+
+    with pytest.raises(ValueError, match="未识别的类别"):
+        parse_class_ids("person,unknown", ["person"])
 
 
 def test_group_rect_boxes_by_label_groups_all_labels_in_one_pass() -> None:
