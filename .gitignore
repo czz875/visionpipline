@@ -51,9 +51,12 @@ docs/
 docs/*
 !docs/AGENTS.md
 !docs/CLAUDE.md
+# 代码审查结论需要入库，作为修复依据与历史留档
+!docs/*代码审查结论.md
 .worktrees/
 .codebuddy/
 .claude/
+.deepseek-harness/
 
 # ===== 本机工具缓存 / 临时数据目录 =====
 Ultralytics/
