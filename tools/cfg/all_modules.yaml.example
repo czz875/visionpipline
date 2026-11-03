@@ -164,6 +164,7 @@ stages:
       --source ${paths.raw_data}
       --output ${paths.annotated}
       --format labelme
+      --apply
 
   - name: auto_onnx
     order: 7
@@ -196,6 +197,7 @@ stages:
       --source ${paths.raw_data}
       --output ${paths.annotated}_detr
       --format labelme
+      --apply
 
   - name: auto_detectors
     order: 7
@@ -205,6 +207,7 @@ stages:
       --detectors-config src/detectors.yaml
       --source ${paths.raw_data}
       --output ${paths.annotated}_multi
+      --apply
 
   # ---------- 第 8/9 批：框合并 + 清洗（模糊检测） ----------
   - name: merge_boxes
@@ -233,12 +236,12 @@ stages:
   - name: clean_orphan
     order: 10
     enabled: true
-    command: python tools/clean/orphan_json.py --dataset-path ${paths.annotated} --recursive
+    command: python tools/clean/orphan_json.py --dataset-path ${paths.annotated} --recursive --apply
 
   - name: remove_missing
     order: 10
     enabled: true
-    command: python tools/clean/orphan_images.py --dataset-path ${paths.annotated} --recursive
+    command: python tools/clean/orphan_images.py --dataset-path ${paths.annotated} --recursive --apply
 
   # ---------- 第 11 批：人工清洗检查点（打印提示后继续） ----------
   - name: manual_review
@@ -274,7 +277,7 @@ stages:
     enabled: true
     command: >
       yolo detect train
-      data=${paths.yolo}/all/data.yaml
+      data=${paths.yolo}/0001/data.yaml
       model=${parameters.yolo_weights}
       epochs=${parameters.yolo_epochs}
       project=${paths.model_dir}
@@ -290,6 +293,7 @@ stages:
       --source ${paths.remaining}
       --output ${paths.self_annotated_labels}
       --format yolo
+      --apply
 
   - name: convert_back_labelme
     order: 16
@@ -298,13 +302,13 @@ stages:
       python tools/convert/yolo_to_labelme.py
       --images ${paths.remaining}
       --labels ${paths.self_annotated_labels}
-      --classes ${paths.yolo}/all/data.yaml
+      --classes ${paths.yolo}/0001/data.yaml
       --output ${paths.labelme_final}
 
   - name: final_clean
     order: 17
     enabled: true
-    command: python tools/clean/orphan_json.py --dataset-path ${paths.labelme_final} --recursive
+    command: python tools/clean/orphan_json.py --dataset-path ${paths.labelme_final} --recursive --apply
 
   - name: archive
     order: 18
@@ -321,6 +325,6 @@ stages:
     enabled: false
     command: >
       python tools/train/create_tar_gz.py
-      --input ${paths.archive}/latest
+      --input ${latest:${paths.archive}/*}
       --output ${paths.archive}/latest.tar.gz
       --level ${parameters.tar_gz_level}

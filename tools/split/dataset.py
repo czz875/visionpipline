@@ -61,9 +61,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--copy",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=True,
-        help="是否复制图片与 JSON（默认复制）。",
+        help="是否复制图片与 JSON（默认复制，可用 --no-copy 关闭）。",
     )
     return parser
 
@@ -72,12 +72,19 @@ def _copy_image_json(
     image_path: Path,
     json_path: Path | None,
     output_dir: Path,
+    source_root: Path,
 ) -> None:
-    """把单张图片及其 LabelMe JSON（如存在）复制到输出目录。"""
-    output_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(image_path, output_dir / image_path.name)
+    """把单张图片及其 LabelMe JSON（如存在）复制到输出目录。
+
+    按相对 ``source_root`` 的路径镜像子目录结构，避免不同子目录下的同名
+    图片 / JSON 被平铺到同一层后互相覆盖。
+    """
+    rel_dir = image_path.parent.relative_to(source_root)
+    out_dir = output_dir / rel_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(image_path, out_dir / image_path.name)
     if json_path is not None and json_path.exists():
-        shutil.copy2(json_path, output_dir / json_path.name)
+        shutil.copy2(json_path, out_dir / json_path.name)
 
 
 def split_dataset(
@@ -117,11 +124,11 @@ def split_dataset(
         json_path = find_json_for_image(image_path)
         if image_path in selected:
             if copy:
-                _copy_image_json(image_path, json_path, output_a)
+                _copy_image_json(image_path, json_path, output_a, input_dir)
             copied_a += 1
         else:
             if copy:
-                _copy_image_json(image_path, json_path, output_b)
+                _copy_image_json(image_path, json_path, output_b, input_dir)
             copied_b += 1
 
     return copied_a, copied_b

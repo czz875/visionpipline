@@ -21,7 +21,7 @@ autolabel 平铺数据（可选）
     │
     ▼
 tools/merge/inherit_dataset.py        按 1000 张/批接续到 behavior/0023/...
-    │                                   并按 JSON label 归类到 8 个分类子目录
+    │                                   并按 JSON label 归类到 6 个分类子目录
     ▼
 tools/label/fix_labelme.py            修复 LabelMe JSON 常见损坏（imagePath / 矩形 / 尺寸）
     │
@@ -84,7 +84,7 @@ JPG 原始数据（可选）──► tools/convert/jpg_to_png.py ──► PNG
 | 阶段 | 脚本 | 说明 |
 |---|---|---|
 | 数据备份 | [tools/backup/snapshot.py](tools/backup/snapshot.py) | 把指定目录打成带时间戳的 .tar.gz 备份 |
-| 数据接续 | [tools/merge/inherit_dataset.py](tools/merge/inherit_dataset.py) | 把 autolabel 平铺数据按 1000/批接续到 behavior 的新 batch，按 JSON label 归类到 8 个分类子目录 |
+| 数据接续 | [tools/merge/inherit_dataset.py](tools/merge/inherit_dataset.py) | 把 autolabel 平铺数据按 1000/批接续到 behavior 的新 batch，按 JSON label 归类到 6 个分类子目录 |
 | LabelMe 修复 | [tools/label/fix_labelme.py](tools/label/fix_labelme.py) | 修复 LabelMe JSON 常见损坏（imagePath / 矩形 / 尺寸） |
 | 标签对齐 | [tools/label/align_labelme.py](tools/label/align_labelme.py) | 把 PNG / LabelMe JSON 按 JSON 内 imagePath 字段对齐（basename 一致）+ 同步 imagePath；补救改名 / 接续后的 PNG-JSON 错位 |
 | 批量改名 | [tools/rename/timestamp_rename.py](tools/rename/timestamp_rename.py) | 按时间戳改名为 YYYYMMDD_HHMMSS_NNNNNN，可选同步 LabelMe JSON 的 imagePath |
@@ -136,16 +136,16 @@ JPG 原始数据（可选）──► tools/convert/jpg_to_png.py ──► PNG
 常用命令（更多见 [AGENTS.md](AGENTS.md) §5.2）：
 
 ```bash
-# YOLO 标注 → LabelMe
+# YOLO 标注 → LabelMe（--apply 才写盘，去掉即预览）
 .conda\python.exe tools\annotate\auto.py --model-type yolo ^
-    --source datasets\raw --output datasets\01_annotated --format labelme
+    --source datasets\raw --output datasets\01_annotated --format labelme --apply
 
 # ONNX 一路 + SAM 第二路，默认预览（加 --apply 才写盘）
 .conda\python.exe tools\annotate\auto.py --model-type onnx ^
     --source datasets\raw --output datasets\01_annotated_onnx_sam ^
     --onnx-model weight\yolov5s-lmk.onnx --onnx-label face ^
     --sam-model weight\sam3.1_multiplex.pt --sam-prompt hand --sam-label hand ^
-    --onnx-min-ratio 0.01 --sam-min-ratio 0.01 --mosaic-block 16
+    --onnx-min-ratio 0.01 --sam-min-ratio 0.01 --mosaic-block 16 --apply
 
 # 多检测器组合（cfg 放 src/，默认预览，--apply 写盘）
 .conda\python.exe tools\annotate\auto.py --detectors-config src\detectors.yaml --apply
@@ -330,8 +330,10 @@ D:\PycharmProjects\visionpipline\.conda\python.exe tools\workflow.py --from-stag
 
 ### 2. 自标注后的 YOLO labels 目录结构不对
 
-`tools/annotate/auto.py` 的 YOLO 输出默认是 `images/` + `labels/` 分开的结构，
-`tools/convert/yolo_to_labelme.py` 需要 `--labels` 指向 `labels/` 目录。
+`tools/annotate/auto.py` 的 YOLO 输出会把 `labels/` 下的 `.txt` 平铺到输出目录
+顶层（`runners/supervision.py` 的 `_flatten_yolo_labels`），因此
+`tools/convert/yolo_to_labelme.py` 的 `--labels` 应指向**输出目录本身**，而不是
+`labels/` 子目录。
 
 ### 3. 30% 高质量数据如何定义「高质量」
 

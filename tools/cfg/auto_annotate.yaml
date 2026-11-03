@@ -17,3 +17,4 @@ stages:
       --source ${paths.raw_data}
       --output ${paths.annotated}
       --format labelme
+      --apply

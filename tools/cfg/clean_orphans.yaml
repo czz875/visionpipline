@@ -19,6 +19,7 @@ paths:
 
 parameters:
   clean_recursive_flag: "--recursive"       # 递归子目录；不递归则改为 ""
+  apply_flag: "--apply"                      # 真正删除孤儿文件；预览时改为 ""
 
 stages_only:
   - copy_input
@@ -39,6 +40,7 @@ stages:
       python tools/clean/orphan_json.py
       --dataset-path "${paths.output_dir}"
       ${parameters.clean_recursive_flag}
+      ${parameters.apply_flag}
 
   - name: remove_orphan_image               # 有图片没 JSON → 删图片
     order: 30
@@ -46,3 +48,4 @@ stages:
       python tools/clean/orphan_images.py
       --dataset-path "${paths.output_dir}"
       ${parameters.clean_recursive_flag}
+      ${parameters.apply_flag}

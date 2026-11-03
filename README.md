@@ -126,8 +126,12 @@ visionpipline/
 .conda\python.exe tools\annotate\auto.py --model-type yolo ^
     --source datasets\raw ^
     --output datasets\01_annotated ^
-    --format labelme
+    --format labelme ^
+    --apply
 ```
+
+> `tools/annotate/auto.py` 默认只预览不写盘，加 `--apply` 才真正输出；下方所有
+> 标注命令都按「真跑」写，需要预览就去掉 `--apply`。
 
 **ONNX 标 face + SAM 标 hand，小框打码删除（默认预览，加 `--apply` 写盘）：**
 
@@ -143,7 +147,7 @@ visionpipline/
 **多检测器组合标注（配置见 `--detectors-config`）：**
 
 ```bash
-.conda\python.exe tools\annotate\auto.py --detectors-config src\detectors.yaml
+.conda\python.exe tools\annotate\auto.py --detectors-config src\detectors.yaml --apply
 ```
 
 **LabelMe 转 YOLO（可选硬链接复用图片）：**

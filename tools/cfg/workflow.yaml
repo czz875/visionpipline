@@ -71,6 +71,7 @@ stages:
       --source ${paths.raw_data}
       --output ${paths.annotated}
       --format labelme
+      --apply
 
   - name: merge_boxes
     command: >
@@ -146,6 +147,7 @@ stages:
       --source ${paths.remaining}
       --output ${paths.self_annotated_labels}
       --format yolo
+      --apply
 
   - name: convert_back_labelme
     command: >

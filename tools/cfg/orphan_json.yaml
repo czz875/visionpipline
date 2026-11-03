@@ -11,6 +11,7 @@ paths:
 
 parameters:
   recursive_flag: "--recursive"
+  apply_flag: "--apply"          # 真正删除；只想预览时改为 ""
 
 stages_only:
   - clean_orphan_json
@@ -21,3 +22,4 @@ stages:
       python tools/clean/orphan_json.py
       --dataset-path ${paths.dataset_path}
       ${parameters.recursive_flag}
+      ${parameters.apply_flag}
