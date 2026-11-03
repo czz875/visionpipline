@@ -1,4 +1,4 @@
-"""
+r"""
 tools/augment/ir_enhance.py
 IR（红外）图像增强脚本。
 
@@ -41,6 +41,7 @@ if __name__ == "__main__" and __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from tools.core import build_timestamped_output_dir  # noqa: E402
+from tools.core import read_image, write_image  # noqa: E402
 
 
 # =============================================================================
@@ -335,10 +336,15 @@ def process_one(
     expand_min: float,
     expand_max: float,
 ) -> None:
-    """处理单张图像，输出 repeat 份增强样本和对应标签。"""
-    img = cv2.imread(str(img_path), cv2.IMREAD_GRAYSCALE)
+    """处理单张图像，输出 repeat 份增强样本和对应标签。
+
+    Raises:
+        OSError: 图片读不出或写不出。必须让异常冒泡到调用方计数，
+            否则中文路径下 cv2 返回 None/False 会让整批静默产出 0 张图。
+    """
+    img = read_image(img_path, cv2.IMREAD_GRAYSCALE)
     if img is None:
-        return
+        raise OSError(f"无法读取图片：{img_path}")
 
     boxes = load_yolo_labels(lbl_path)
     base_name = img_path.stem
@@ -357,7 +363,7 @@ def process_one(
         )
         img_name = f"{base_name}_ir_aug{i}{ext}"
         lbl_name = f"{base_name}_ir_aug{i}.txt"
-        cv2.imwrite(str(out_img_dir / img_name), aug_img)
+        write_image(out_img_dir / img_name, aug_img)
         save_yolo_labels(out_img_dir / lbl_name, boxes)
 
 

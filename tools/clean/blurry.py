@@ -20,7 +20,13 @@ if __name__ == "__main__" and __package__ in (None, ""):
 from cleanvision import Imagelab
 from PIL import Image
 
-from tools.core import DEFAULT_DATASET_PATH, list_labelme_files, load_labelme
+from tools.core import (
+    DEFAULT_DATASET_PATH,
+    find_json_for_image,
+    list_images,
+    list_labelme_files,
+    load_labelme,
+)
 
 DEFAULT_CROP_PATH = Path("datasets_label_crop").resolve()
 DEFAULT_OUTPUT_PATH = Path("datasets_blurry").resolve()
@@ -138,6 +144,9 @@ def _crop_labelme(
     json_files = list_labelme_files(dataset_path, recursive=recursive)
     if not json_files:
         print(f"[警告] 在 {dataset_path} 中未找到 LabelMe JSON。")
+        # 仍需建出空目录：_find_blurry_originals 会遍历它判断是否为空，
+        # 目录不存在时 iterdir() 抛 FileNotFoundError，整批直接崩掉。
+        crop_path.mkdir(parents=True, exist_ok=True)
         return
 
     crop_path.mkdir(parents=True, exist_ok=True)
@@ -153,7 +162,7 @@ def _find_blurry_originals(
     blurry_threshold: float,
 ) -> set[Path]:
     """运行 CleanVision，返回需要移出的原图路径集合。"""
-    if not any(crop_path.iterdir()):
+    if not crop_path.is_dir() or not any(crop_path.iterdir()):
         print("[警告] 裁剪目录为空，跳过模糊检测。")
         return set()
 
@@ -168,7 +177,7 @@ def _find_blurry_originals(
     ]
     print(f"\n检测到模糊目标区域: {len(blurry)}")
 
-    bad_images: set[Path] = set()
+    bad_images: set[str] = set()
     for crop_name in blurry.index:
         stem = Path(crop_name).stem
         # 裁剪文件名格式：{original_stem}_{label}_{idx}
@@ -183,14 +192,24 @@ def _move_bad_images(
     output_path: Path,
     bad_stems: set[str],
 ) -> int:
-    """把模糊原图移动到输出目录，返回移动数量。"""
+    """把模糊原图连同同名 LabelMe JSON 移动到输出目录，返回移动的图片数。
+
+    按相对 ``dataset_path`` 的路径镜像子目录结构，避免不同批次/分类下的同名
+    图片被平铺到同一层后互相覆盖；同名 JSON 一并移走，否则原目录会留下孤儿 JSON。
+    """
     output_path.mkdir(parents=True, exist_ok=True)
     moved = 0
     for image_path in list_images(dataset_path, recursive=True):
-        if image_path.stem in bad_stems:
-            dst = output_path / image_path.name
-            shutil.move(str(image_path), str(dst))
-            moved += 1
+        if image_path.stem not in bad_stems:
+            continue
+        rel_dir = image_path.parent.relative_to(dataset_path)
+        out_dir = output_path / rel_dir
+        out_dir.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(image_path), str(out_dir / image_path.name))
+        json_path = find_json_for_image(image_path)
+        if json_path.exists():
+            shutil.move(str(json_path), str(out_dir / json_path.name))
+        moved += 1
     return moved
 
 

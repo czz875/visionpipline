@@ -173,7 +173,11 @@ def process_labelme_json(json_path: Path, args: argparse.Namespace) -> str | Non
         if shape.get("shape_type") != "rectangle":
             continue
 
-        label = shape["label"]
+        label = shape.get("label", "")
+        if not label:
+            # 缺 label 的坏 shape 跳过即可；直接下标会让 KeyError 从 future.result()
+            # 抛出，终止整个 ThreadPoolExecutor，本轮所有 JSON 白跑。
+            continue
         box = rect_to_xyxy(shape["points"])
 
         if label == args.face_label:
@@ -222,16 +226,21 @@ def process_labelme_json(json_path: Path, args: argparse.Namespace) -> str | Non
     return None
 
 
-def process_json_dir_mt(dir_path: Path, args: argparse.Namespace) -> None:
-    """递归处理目录下所有 LabelMe JSON 文件。"""
+def process_json_dir_mt(dir_path: Path, args: argparse.Namespace) -> int:
+    """递归处理目录下所有 LabelMe JSON 文件。
+
+    Returns:
+        处理的 JSON 文件数；目录不存在或没有 JSON 时返回 ``-1``，由 ``main``
+        转成非 0 退出码——否则定时任务会把「什么都没合并」误判为成功。
+    """
     if not dir_path.exists():
         print(f"Error: Directory {dir_path} does not exist.")
-        return
+        return -1
 
     json_files = list_labelme_files(dir_path, recursive=True)
     if not json_files:
         print(f"No JSON files found in {dir_path} or its subdirectories.")
-        return
+        return -1
 
     print(f"Found {len(json_files)} JSON files. Starting recursive merge...")
 
@@ -243,6 +252,7 @@ def process_json_dir_mt(dir_path: Path, args: argparse.Namespace) -> None:
             error_msg = future.result()
             if error_msg:
                 print(error_msg)
+    return len(json_files)
 
 
 def main() -> int:
@@ -250,7 +260,9 @@ def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
     json_dir = _resolve_json_dir(args.json_dir.resolve())
-    process_json_dir_mt(json_dir, args)
+    processed = process_json_dir_mt(json_dir, args)
+    if processed < 0:
+        return 1
     print(f"OUTPUT_PATH:{json_dir}")
     print("Done.")
     return 0

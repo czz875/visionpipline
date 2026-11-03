@@ -67,8 +67,12 @@ DEFAULT_LABELME_SYNC = False            # 改名时是否同步同目录 LabelMe
 
 
 def _is_multi_ext(path: Path) -> str:
-    """拿到需要保留的扩展名（最后一段，如 ``.png`` / ``.gz``）。"""
-    return path.suffix  # 简单场景只取最后一段；多段扩展名（.tar.gz）也只留 .gz
+    """拿到需要保留的完整扩展名（如 ``.png`` / ``.tar.gz``）。
+
+    不能用 ``path.suffix``：它只返回最后一段，``.tar.gz`` 会被截成 ``.gz``，
+    改名后归档文件就打不开了。
+    """
+    return "".join(path.suffixes) or path.suffix
 
 
 def _timestamp_to_str(ts: float) -> str:
@@ -144,34 +148,25 @@ def _plan_labelme_sync(
 def _apply_labelme_sync(
     old_image: Path,
     new_image: Path,
-) -> None:
+) -> str | None:
     """把 ``old_image`` 同目录同名 JSON 跟着 PNG 一起改名 + 同步 imagePath。
 
     找不到同名 JSON / JSON 解析失败时静默跳过（视为该 PNG 没有配对标注）。
     撞名时在 JSON 文件名后加 ``__dupN`` 兜底。
+
+    顺序是「先 rename、成功后再改 imagePath」：反过来一旦 rename 失败，JSON 会
+    留在旧文件名上而 imagePath 已指向新名字，制造出 PNG 与 JSON 错位。
+
+    Returns:
+        失败信息；成功或无需处理时返回 ``None``。
     """
     plan = _plan_labelme_sync(old_image, new_image)
     if plan is None:
-        return
+        return None
     json_path, new_json_path = plan
     new_image_name = new_image.name
 
-    # 1) 同步 imagePath 字段
-    try:
-        data = json.loads(json_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        data = None
-    if data is not None and data.get("imagePath") != new_image_name:
-        data["imagePath"] = new_image_name
-        try:
-            json_path.write_text(
-                json.dumps(data, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-        except OSError:
-            return
-
-    # 2) 改名 JSON 文件（撞名兜底）
+    # 1) 先改名 JSON 文件（撞名兜底）
     if new_json_path.exists():
         base = new_json_path.stem
         suffix = new_json_path.suffix
@@ -184,8 +179,28 @@ def _apply_labelme_sync(
             n += 1
     try:
         json_path.rename(new_json_path)
-    except OSError:
-        pass
+    except OSError as exc:
+        return f"{json_path.name} 改名失败，imagePath 未同步：{exc}"
+
+    # 2) 改名成功后再同步 imagePath 字段
+    try:
+        data = json.loads(new_json_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None  # 视为无配对标注，不阻断改名
+    if data.get("imagePath") == new_image_name:
+        return None
+    data["imagePath"] = new_image_name
+    try:
+        new_json_path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        return (
+            f"{new_json_path.name} 已改名但 imagePath 写入失败"
+            f"（现指向 {data.get('imagePath')!r}）：{exc}"
+        )
+    return None
 
 
 def rename_by_timestamp(
@@ -196,8 +211,8 @@ def rename_by_timestamp(
     dry_run: bool = DEFAULT_DRY_RUN,
     seq_width: int = DEFAULT_SEQ_WIDTH,
     labelme_sync: bool = DEFAULT_LABELME_SYNC,
-) -> list[tuple[Path, Path]]:
-    """执行批量重命名。返回 ``(old, new)`` 计划列表（dry-run 时也返回，但不会写盘）。
+) -> tuple[list[tuple[Path, Path]], list[str]]:
+    """执行批量重命名。
 
     **只对 PNG / JPG 排序改名**——LabelMe JSON 不参与 mtime 排序，否则
     JSON 复制时间或 auto-annotate 生成时间会和 PNG 原始拍照时间错位，
@@ -205,6 +220,10 @@ def rename_by_timestamp(
 
     当 ``labelme_sync=True`` 时，会让每个 PNG/JPG 的**当前同名** LabelMe
     JSON 一起改名为 ``<新图名>.json``，并同步其 ``imagePath`` 字段。
+
+    Returns:
+        ``(plans, errors)``。``plans`` 是 ``(old, new)`` 列表（dry-run 时也返回
+        但不写盘）；``errors`` 是 JSON 同步失败信息，非空时调用方应以非 0 退出。
     """
     files = _collect_files(source_dir, recursive=recursive)
 
@@ -227,14 +246,17 @@ def rename_by_timestamp(
         plans.append((src, target))
 
     if dry_run:
-        return plans
+        return plans, []
 
+    errors: list[str] = []
     op_label = "改名" + (" + 同步 JSON" if labelme_sync else "")
     for old, new in tqdm(plans, desc=op_label, unit="file"):
         old.rename(new)
         if labelme_sync:
-            _apply_labelme_sync(old, new)
-    return plans
+            err = _apply_labelme_sync(old, new)
+            if err:
+                errors.append(err)
+    return plans, errors
 
 
 # =============================================================================
@@ -295,7 +317,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        plans = rename_by_timestamp(
+        plans, errors = rename_by_timestamp(
             args.source_dir,
             time_source=args.time_source,
             recursive=args.recursive,
@@ -312,6 +334,11 @@ def main() -> int:
     print(f"[{mode}] {len(plans)} 个文件将被改名（按 {args.time_source} 升序）{sync_note}")
     for old, new in plans:
         print(f"  {old.name}  ->  {new.name}")
+    if errors:
+        print(f"\n[错误] {len(errors)} 个 JSON 同步失败：", file=sys.stderr)
+        for msg in errors:
+            print(f"  {msg}", file=sys.stderr)
+        return 1
     if args.dry_run:
         print("\n（这是 dry-run 预览，加上 --apply 才会真正改名）")
     return 0
