@@ -6,11 +6,13 @@
 # 安装后建议再跑一次冒烟测试：
 #   .conda\python.exe -c "import supervision, cleanvision, ultralytics; print(supervision.__version__, cleanvision.__version__, ultralytics.__version__)"
 #
-# 版本说明：下方版本均为本机已验证可运行的组合（2026-07-14 核验）。
+# 版本说明：下方版本均为本机已验证可运行的组合（2026-11-03 按实际环境核验）。
 #   - PyTorch 钉的是 PyPI 默认（CPU）版本；本机实际用的是 CUDA 12.x
-#     构建（torch 2.11.0+cu130），如需 CUDA 版见“PyTorch”段注释中的命令。
+#     构建（torch 2.12.1+cu130），如需 CUDA 版见“PyTorch”段注释中的命令。
+#     直接 `pip install -r requirements.txt` 会装成 CPU 版并覆盖已有的 CUDA
+#     构建——本机有 GPU，请优先走该段给出的 cu130 索引命令。
 #   - SAM3 文本提示标注走 ultralytics 的 SAM3SemanticPredictor，仅依赖
-#     CLIP（从 ultralytics 仓库安装，提供 `clip` 包）；权重为本地文件
+#     CLIP（提供 `clip` 包）；权重为本地文件
 #     weight/sam3.1_multiplex.pt（不走 PyPI，需自行放置）。不需要
 #     transformers —— 那是旧的 facebook/sam3(HF) 方案遗留，现已弃用。
 #   - LabelMe 导出由 tools.core 自行实现（supervision 0.29.x 缺失
@@ -25,17 +27,20 @@ cleanvision==0.3.7
 
 # ---------- 训练 / 推理（推荐） ----------
 # YOLOv8 系列训练与推理；同时提供 SAM3 的 SAM3SemanticPredictor
-ultralytics==8.4.86
+ultralytics==8.4.93
 # SAM3 文本提示依赖：ultralytics 的 SAM3SemanticPredictor 需要 CLIP。
-# CLIP 不在 PyPI，从 ultralytics 维护的仓库安装（安装后提供 `clip` 包）。
-git+https://github.com/ultralytics/CLIP.git
+# 本机装的是 PyPI 上的 clip（OpenAI 官方包），与 ultralytics 维护的同名仓库
+# 分发来源不同；SAM3 只用到 `clip` 这个导入名，两者均可。
+clip==1.0
 
 # ---------- PyTorch ----------
 # PyPI 默认是 CPU 构建，钉版本以保证可复现：
-torch==2.11.0
-torchvision==0.26.0
+torch==2.12.1
+# torchvision 由 ultralytics / clip 间接依赖，仓库内没有直接 import；
+# 保留钉版本是为了锁住与 torch 的 ABI 匹配。
+torchvision==0.27.1
 # 如需 CUDA 12.x 构建（本机即用此版，推理更快），改用 pytorch 官方源安装：
-#   .conda\python.exe -m pip install torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cu130
+#   .conda\python.exe -m pip install torch==2.12.1 torchvision==0.27.1 --index-url https://download.pytorch.org/whl/cu130
 
 # ---------- ONNX 推理 ----------
 # ONNX 检测器（tools/annotate/backends/onnx.py 通用封装）使用；
