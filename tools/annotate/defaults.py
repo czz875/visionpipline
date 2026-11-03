@@ -16,7 +16,10 @@ DEFAULT_MODEL_TYPE = "yolo"
 DEFAULT_YOLO_MODEL = "yolov8n.pt"
 DEFAULT_DETR_MODEL = "rtdetr-l.pt"
 DEFAULT_SAM3_MODEL = r"weight\sam3.1_multiplex.pt"
-DEFAULT_SOURCE = Path("datasets/0024")
+# 待标注的原始图片目录；与 tools/cfg/default.yaml 的 paths.raw_data 口径一致。
+# 注意：该目录是流水线的输入位置，本机当前的数据在 datasets/behavior 下，
+# 直接跑 auto.py 前请用 --source 显式指定实际目录。
+DEFAULT_SOURCE = Path("datasets/raw")
 DEFAULT_FORMAT = "labelme"
 DEFAULT_CLASSES = ""
 DEFAULT_CONF = 0.25
@@ -43,8 +46,10 @@ DEFAULT_SAM_MIN_RATIO = 0.01
 
 # ONNX 覆盖模式（--model-type onnx --reannotate）
 DEFAULT_INPUT_ROOT = r"datasets\behavior"
-DEFAULT_START_BATCH = 23
-DEFAULT_END_BATCH = 37
+# 批次范围默认不限（None = root 下全部 4 位数字批次目录）；
+# 显式指定时按 start~end 闭区间处理。
+DEFAULT_START_BATCH = None
+DEFAULT_END_BATCH = None
 DEFAULT_KEEP_MIN_RATIO = None
 
 # 打码：马赛克块大小（像素），越大越糊。

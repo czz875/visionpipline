@@ -61,7 +61,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import shutil
 import sys
 from collections import Counter
@@ -74,7 +73,10 @@ if __name__ == "__main__" and __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from tools.core import (
+    BATCH_DIR_RE,
+    CLASS_PRIORITY,
     IMAGE_EXTENSIONS,
+    YOLO_CLASS_NAMES,
     build_related_batch_stage_dir,
     list_images,
     load_labelme,
@@ -98,26 +100,16 @@ DEFAULT_RECURSIVE = False  # 通用参数：递归扫描 source 子目录下的 
 DEFAULT_NO_CLASSIFY = False  # 通用参数：不按 label 分类，直接平铺进 batch 目录
 DEFAULT_NO_BATCH_STAGE = False  # 通用参数：不包装为 batch_<timestamp> 结构，直接写入 target
 
-# 分类目录与标签的映射；目录编号不代表分类优先级
+# 分类目录与标签的映射；目录编号不代表分类优先级。
+# 标签集合与优先级取自 tools.core.constants（唯一权威来源），
+# 目录编号顺序按 YOLO_CLASS_NAMES 排列，与 class id 对齐。
 CATEGORY_LABELS: dict[str, str] = {
-    "0": "phone",
-    "1": "cigarette",
-    "2": "face",
-    "3": "hand",
-    "4": "helmet",
+    str(class_id): label
+    for class_id, label in enumerate(YOLO_CLASS_NAMES)
 }
-CLASSIFICATION_PRIORITY: tuple[str, ...] = (
-    "helmet",
-    "cigarette",
-    "phone",
-    "hand",
-    "face",
-)
+CLASSIFICATION_PRIORITY: tuple[str, ...] = CLASS_PRIORITY
 OTHER_CATEGORY = "other"
 CATEGORY_DIRS: tuple[str, ...] = (*CATEGORY_LABELS, OTHER_CATEGORY)
-
-# 匹配 4 位数字 batch 目录名
-BATCH_DIR_RE = re.compile(r"^\d{4}$")
 
 
 # =============================================================================

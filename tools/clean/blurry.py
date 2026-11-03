@@ -22,6 +22,7 @@ from PIL import Image
 
 from tools.core import (
     DEFAULT_DATASET_PATH,
+    YOLO_CLASS_NAMES,
     find_json_for_image,
     list_images,
     list_labelme_files,
@@ -32,7 +33,9 @@ DEFAULT_CROP_PATH = Path("datasets_label_crop").resolve()
 DEFAULT_OUTPUT_PATH = Path("datasets_blurry").resolve()
 DEFAULT_BLURRY_THRESHOLD = 0.18
 DEFAULT_WORKERS = 16
-DEFAULT_TARGET_LABELS = {"face", "hand", "phone", "cigarette"}
+# 模糊检测的目标类别取自 tools.core.constants.YOLO_CLASS_NAMES（唯一权威来源），
+# 与 YOLO 类别表口径一致——原先这里少了 helmet，会导致头盔区域的模糊永远不被检出。
+DEFAULT_TARGET_LABELS: set[str] = set(YOLO_CLASS_NAMES)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -73,7 +76,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--target-labels",
         default=",".join(sorted(DEFAULT_TARGET_LABELS)),
-        help="需要检测的目标类别，逗号分隔（默认：face,hand,phone,cigarette）。",
+        help=(
+            "需要检测的目标类别，逗号分隔"
+            f"（默认：{','.join(sorted(DEFAULT_TARGET_LABELS))}）。"
+        ),
     )
     parser.add_argument(
         "--recursive",
@@ -222,6 +228,12 @@ def main() -> int:
     crop_path = args.crop_path.resolve()
     output_path = args.output_path.resolve()
     target_labels = _parse_labels(args.target_labels)
+
+    # 数据集目录不存在时必须报错：list_labelme_files 对不存在的目录返回空列表，
+    # 直接往下走会打印「未找到 LabelMe JSON」并返回 0，让工作流误判该阶段成功。
+    if not dataset_path.is_dir():
+        print(f"[错误] 数据集目录不存在：{dataset_path}")
+        return 1
 
     # 1. 裁剪目标区域
     _crop_labelme(

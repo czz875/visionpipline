@@ -4,15 +4,14 @@ tools/annotate/backends/onnx.py
 ONNX 检测后端：通用 ONNX 推理封装 ``OnnxDetector``，以及 YOLO 风格输出的
 预处理 / 解码 / provider 选择等适配函数。
 
-不绑定任何具体类别（face / hand 等），通过 ``transpose`` / ``score_indices`` /
-``decoder`` 适配不同 YOLO 风格输出；返回的是原图像素坐标系下的 ``xyxy`` numpy
+不绑定任何具体类别（face / hand 等），通过 ``transpose`` / ``score_indices``
+适配不同 YOLO 风格输出；返回的是原图像素坐标系下的 ``xyxy`` numpy
 框，供 ``auto.py``（ONNX 模式）等编排脚本复用。
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
 
 import cv2
 import numpy as np
@@ -164,10 +163,6 @@ def decode_yolo_outputs(
     return boxes[kept_indices]
 
 
-# 解码函数签名：decoder(outputs, image_shape, input_size, conf, iou) -> xyxy 数组
-DecoderType = Callable[[list[np.ndarray], tuple[int, int, int], tuple[int, int], float, float], np.ndarray]
-
-
 # =============================================================================
 # 3. ONNX 检测器
 # =============================================================================
@@ -176,8 +171,7 @@ DecoderType = Callable[[list[np.ndarray], tuple[int, int, int], tuple[int, int],
 class OnnxDetector:
     """通用 ONNX 检测器（不绑定具体类别）。
 
-    通过 ``transpose`` / ``score_indices`` 适配不同 YOLO 风格输出；
-    若模型输出非常规，可传入自定义 ``decoder``。
+    通过 ``transpose`` / ``score_indices`` 适配不同 YOLO 风格输出。
     """
 
     def __init__(
@@ -190,7 +184,6 @@ class OnnxDetector:
         iou_threshold: float = 0.45,
         transpose: bool = False,
         score_indices: tuple[int, ...] = (4,),
-        decoder: DecoderType | None = None,
     ) -> None:
         import onnxruntime as ort
 
@@ -201,7 +194,6 @@ class OnnxDetector:
         self.iou_threshold = iou_threshold
         self.transpose = transpose
         self.score_indices = score_indices
-        self.decoder = decoder
 
         self.providers = resolve_execution_providers(
             get_available_execution_providers(ort)
@@ -225,19 +217,14 @@ class OnnxDetector:
             normalize=self.normalize,
         )
         outputs = self.session.run(None, {self.input_name: tensor})
-        if self.decoder is not None:
-            boxes = self.decoder(
-                outputs, image.shape, self.input_size, self.conf, self.iou_threshold
-            )
-        else:
-            boxes = decode_yolo_outputs(
-                outputs,
-                image.shape,
-                self.input_size,
-                self.conf,
-                self.iou_threshold,
-                transpose=self.transpose,
-                score_indices=self.score_indices,
-            )
+        boxes = decode_yolo_outputs(
+            outputs,
+            image.shape,
+            self.input_size,
+            self.conf,
+            self.iou_threshold,
+            transpose=self.transpose,
+            score_indices=self.score_indices,
+        )
         labels = [self.label] * len(boxes)
         return boxes, labels

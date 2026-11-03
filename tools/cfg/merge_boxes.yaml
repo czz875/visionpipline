@@ -29,6 +29,9 @@ stages:
       python tools/annotate/merge.py
       --json-dir ${paths.annotated}
       --face-label ${parameters.face_label}
+      --right-cut-ratio ${parameters.right_cut_ratio}
+      --min-face-width ${parameters.min_face_width}
+      --min-face-height ${parameters.min_face_height}
       --merge-distance-x ${parameters.merge_distance_x}
       --merge-distance-y ${parameters.merge_distance_y}
       --max-merge-width ${parameters.max_merge_width}

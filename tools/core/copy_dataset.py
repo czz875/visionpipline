@@ -9,7 +9,7 @@ from pathlib import Path
 if __name__ == "__main__" and __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from tools.core import DEFAULT_DATASET_PATH
+from tools.core.constants import DEFAULT_DATASET_PATH
 
 
 # 默认参数（集中放文件顶部，argparse / 回退统一引用）

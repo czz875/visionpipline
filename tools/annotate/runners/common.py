@@ -17,6 +17,7 @@ import numpy as np
 from tqdm import tqdm
 
 from tools.core import (
+    BATCH_DIR_RE,
     list_images,
     load_labelme,
     read_image,
@@ -251,11 +252,28 @@ def resolve_keep_labels(
     return labels
 
 
-def iter_batch_image_files(root: Path, start_batch: int, end_batch: int) -> list[Path]:
-    """收集指定 batch 范围内存在的图片（按 ``0000``~``9999`` 子目录组织）。"""
+def iter_batch_image_files(
+    root: Path,
+    start_batch: int | None,
+    end_batch: int | None,
+) -> list[Path]:
+    """收集指定 batch 范围内存在的图片（按 ``0000``~``9999`` 子目录组织）。
+
+    ``start_batch`` / ``end_batch`` 传 ``None`` 表示不限范围，改由 ``root`` 下
+    实际存在的 4 位数字批次目录决定——这样新增批次不会被静默漏掉。
+    """
+    if start_batch is None and end_batch is None:
+        batch_dirs = sorted(
+            p for p in root.iterdir()
+            if p.is_dir() and BATCH_DIR_RE.match(p.name)
+        ) if root.is_dir() else []
+    else:
+        start = 0 if start_batch is None else start_batch
+        end = 9999 if end_batch is None else end_batch
+        batch_dirs = [root / f"{batch_id:04d}" for batch_id in range(start, end + 1)]
+
     image_paths: list[Path] = []
-    for batch_id in range(start_batch, end_batch + 1):
-        batch_dir = root / f"{batch_id:04d}"
+    for batch_dir in batch_dirs:
         if batch_dir.is_dir():
             image_paths.extend(list_images(batch_dir, recursive=True))
     return image_paths

@@ -37,17 +37,27 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--apply",
-        action="store_true",
+        dest="dry_run",
+        action="store_false",
         help="确认预览无误后，加 --apply 才真正删除（默认 dry-run）。",
     )
+    parser.set_defaults(dry_run=DEFAULT_DRY_RUN)
     return parser
 
 
 def main() -> int:
     """脚本入口。"""
     args = _build_parser().parse_args()
-    dry_run = not args.apply
-    json_files = list_labelme_files(args.dataset_path.resolve(), recursive=args.recursive)
+    dry_run = args.dry_run
+    input_dir = args.dataset_path.resolve()
+
+    # 目录不存在时必须报错：list_labelme_files 对不存在的目录返回空列表，
+    # 直接往下走会打印「共 0 个」并返回 0，让工作流误判该阶段成功。
+    if not input_dir.is_dir():
+        print(f"[错误] 数据集目录不存在：{input_dir}")
+        return 1
+
+    json_files = list_labelme_files(input_dir, recursive=args.recursive)
 
     deleted = 0
     for json_file in json_files:

@@ -92,6 +92,19 @@ def main() -> int:
     """脚本入口。"""
     args = _build_parser().parse_args()
     root = args.dataset_path.resolve()
+
+    # 目录不存在时必须报错：glob 对不存在的目录返回空列表，
+    # 直接往下走会报「共 0 个」并返回 0，让工作流误判该阶段成功。
+    if not root.is_dir():
+        print(f"[错误] 数据集目录不存在：{root}")
+        return 1
+
+    # tolerance 必须为正：0 会让 log10(0) 抛 math domain error，
+    # 非正数没有去重意义。
+    if args.tolerance <= 0:
+        print(f"[错误] --tolerance 必须大于 0（当前：{args.tolerance}）。")
+        return 1
+
     decimals = max(0, int(-math.log10(args.tolerance)))
 
     label_files = _list_label_files(root, args.recursive)

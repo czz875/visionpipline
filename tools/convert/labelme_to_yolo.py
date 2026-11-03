@@ -45,6 +45,7 @@ from supervision.dataset.formats.yolo import detections_to_yolo_annotations
 
 from tools.core import (
     IMAGE_EXTENSIONS,
+    YOLO_CLASS_NAMES,
     labelme_dict_to_detections,
     load_labelme,
     unregistered_labels,
@@ -58,7 +59,9 @@ from tools.core import (
 DEFAULT_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_SRC_DIR = DEFAULT_PROJECT_ROOT / "datasets" / "behavior"
 DEFAULT_OUT_DIR = DEFAULT_PROJECT_ROOT / "datasets" / "yolo"
-DEFAULT_CLASS_NAMES: tuple[str, ...] = ("phone", "cigarette", "face", "hand")
+# 类别表取自 tools.core.constants.YOLO_CLASS_NAMES（唯一权威来源），
+# 与磁盘上 datasets/yolo/*/data.yaml 保持一致；顺序即 class id。
+DEFAULT_CLASS_NAMES: tuple[str, ...] = YOLO_CLASS_NAMES
 DEFAULT_SPLITS: tuple[str, ...] = ("train", "val")
 DEFAULT_RATIOS: tuple[float, ...] = (0.9, 0.1)
 DEFAULT_SEED = 3407

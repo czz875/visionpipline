@@ -42,7 +42,6 @@ from tools.annotate.defaults import (    DEFAULT_CLASSES,
     DEFAULT_MOSAIC_BLOCK,
     DEFAULT_YOLO_MODEL,
     DEFAULT_SAM3_MODEL,
-    DEFAULT_VERBOSE,
 )
 
 
@@ -196,11 +195,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--start-batch", type=int, default=DEFAULT_START_BATCH,
-        help=f"覆盖模式起始 batch 编号（默认：{DEFAULT_START_BATCH}）。",
+        help="覆盖模式起始 batch 编号；默认不限（处理全部批次）。",
     )
     parser.add_argument(
         "--end-batch", type=int, default=DEFAULT_END_BATCH,
-        help=f"覆盖模式结束 batch 编号（默认：{DEFAULT_END_BATCH}）。",
+        help="覆盖模式结束 batch 编号；默认不限（处理全部批次）。",
     )
     parser.add_argument(
         "--keep-labels",

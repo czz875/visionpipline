@@ -14,6 +14,10 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tools.core.constants import YOLO_CLASS_NAMES
+from tools.convert.labelme_to_yolo import DEFAULT_CLASS_NAMES
+from tools.merge.inherit_dataset import CATEGORY_LABELS
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CFG_DIR = REPO_ROOT / "tools" / "cfg"
 YOLO_ROOT = REPO_ROOT / "datasets" / "yolo"
@@ -23,6 +27,30 @@ def _default_yolo_classes() -> list[str]:
     data = yaml.safe_load((CFG_DIR / "default.yaml").read_text(encoding="utf-8"))
     raw = data["parameters"]["yolo_classes"]
     return [c.strip() for c in raw.split(",") if c.strip()]
+
+
+def test_code_constant_is_the_single_source_of_truth() -> None:
+    """代码里的类别表必须直接引用 tools.core.constants.YOLO_CLASS_NAMES。
+
+    历史上 ``labelme_to_yolo.py`` 写死了 4 类（缺 helmet）、``default.yaml``
+    是 5 类，不传 ``--classes`` 直接跑就会把 helmet 标注全部丢弃。
+    这里锁住「代码常量 == core 常量」，并要求继承映射与之对齐。
+    """
+    assert DEFAULT_CLASS_NAMES == YOLO_CLASS_NAMES, (
+        "labelme_to_yolo 的 DEFAULT_CLASS_NAMES 必须直接引用 "
+        "tools.core.constants.YOLO_CLASS_NAMES"
+    )
+    assert list(CATEGORY_LABELS.values()) == list(YOLO_CLASS_NAMES), (
+        "inherit_dataset 的 CATEGORY_LABELS 顺序必须与 YOLO_CLASS_NAMES 一致"
+    )
+
+
+def test_default_yaml_matches_code_constant() -> None:
+    """default.yaml 的 yolo_classes 必须与代码常量一致。"""
+    assert _default_yolo_classes() == list(YOLO_CLASS_NAMES), (
+        "default.yaml 的 yolo_classes 与 tools.core.constants.YOLO_CLASS_NAMES 不一致；"
+        "不传 --classes 直接跑转换会丢弃缺失类别的标注"
+    )
 
 
 def _disk_yolo_classes() -> list[str]:

@@ -32,7 +32,7 @@ tools/rename/timestamp_rename.py      按时间戳改名 + 同步 JSON 的 image
 JPG 原始数据（可选）──► tools/convert/jpg_to_png.py ──► PNG
                                                         │
                                                         ▼
-补充 PNG 数据（固定尺寸；`project.image_width/height` 仅作记录，脚本不据此缩放）
+补充 PNG 数据（固定尺寸；脚本不据此缩放，实际尺寸由采集端保证）
     │
     ▼
 多后端自动标注（YOLO / SAM3 / DETR / ONNX）──► LabelMe JSON

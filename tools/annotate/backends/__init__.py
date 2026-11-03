@@ -16,12 +16,10 @@ from __future__ import annotations
 
 from tools.annotate.backends.base import (
     AutoLabeler,
-    DatasetLike,
     DetectionsLike,
 )
 from tools.annotate.backends.detr import DETRLabeler
 from tools.annotate.backends.onnx import (
-    DecoderType,
     OnnxDetector,
     apply_nms,
     decode_yolo_outputs,
@@ -41,11 +39,9 @@ from tools.annotate.backends.yolo import YOLOLabeler
 
 __all__ = [
     "AutoLabeler",
-    "DatasetLike",
     "DetectionsLike",
     # ONNX
     "OnnxDetector",
-    "DecoderType",
     "apply_nms",
     "decode_yolo_outputs",
     "get_available_execution_providers",

@@ -17,10 +17,13 @@
 
 | 模块 | 说明 | 主要导出 |
 |---|---|---|
-| `constants.py` | 共享常量 | `DEFAULT_DATASET_PATH`、`IMAGE_EXTENSIONS`、`LABELME_EXT` |
+| `constants.py` | 共享常量 | `DEFAULT_DATASET_PATH`、`IMAGE_EXTENSIONS`、`LABELME_EXT`、`BATCH_DIR_RE`、`YOLO_CLASS_NAMES`、`CLASS_PRIORITY` |
 | `images.py` | 图片文件扫描 | `list_images(folder, extensions=..., recursive=...)` |
+| `image_io.py` | 中文路径安全的图片读写 | `read_image`、`write_image`、`image_size` |
 | `labelme.py` | LabelMe JSON 扫描与读写 | `list_labelme_files`、`load_labelme`、`save_labelme`、`find_image_for_json`、`find_json_for_image` |
 | `geometry.py` | 边界框几何工具 | `rect_to_xyxy`、`xyxy_to_points`、`get_boxes_dist`、`merge_near_boxes` |
+| `output_dir.py` | 输出目录协议 | `build_timestamped_output_dir`、`build_batch_stage_dir`、`resolve_latest_batch_stage_dir` |
+| `copy_dataset.py` | 数据集复制 / 硬链接 | `copy_dataset` |
 
 ---
 
@@ -54,7 +57,7 @@ from tools.core import (
 from pathlib import Path
 from tools.core import list_images, list_labelme_files
 
-folder = Path("datasets/autolabel")
+folder = Path("datasets/behavior")
 images = list_images(folder)
 jsons = list_labelme_files(folder)
 ```
@@ -64,7 +67,7 @@ jsons = list_labelme_files(folder)
 ```python
 from tools.core import load_labelme, save_labelme
 
-json_path = Path("datasets/autolabel/0001.json")
+json_path = Path("datasets/behavior/0001/000001.json")
 data = load_labelme(json_path)
 
 # 修改 shapes ...
@@ -77,10 +80,10 @@ save_labelme(data, json_path)
 ```python
 from tools.core import find_image_for_json, find_json_for_image
 
-json_path = Path("datasets/autolabel/0001.json")
+json_path = Path("datasets/behavior/0001/000001.json")
 img_path = find_image_for_json(json_path)  # 未找到返回 None
 
-image_path = Path("datasets/autolabel/0001.jpg")
+image_path = Path("datasets/behavior/0001/000001.jpg")
 json_path = find_json_for_image(image_path)
 ```
 

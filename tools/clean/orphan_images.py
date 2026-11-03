@@ -37,9 +37,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--apply",
-        action="store_true",
+        dest="dry_run",
+        action="store_false",
         help="确认预览无误后，加 --apply 才真正删除（默认 dry-run）。",
     )
+    parser.set_defaults(dry_run=DEFAULT_DRY_RUN)
     return parser
 
 
@@ -47,7 +49,7 @@ def main() -> int:
     """脚本入口。"""
     args = _build_parser().parse_args()
     input_dir = args.dataset_path.resolve()
-    dry_run = not args.apply
+    dry_run = args.dry_run
 
     if not input_dir.is_dir():
         print(f"[错误] 数据集目录不存在：{input_dir}")
