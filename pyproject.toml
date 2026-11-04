@@ -20,7 +20,11 @@ packages = ["tools"]
 # 这样 tests 里的 `from tools.xxx import ...` 无需额外设置 PYTHONPATH。
 pythonpath = ["."]
 testpaths = ["tests"]
-addopts = "-ra"
+addopts = "-ra -p no:cacheprovider --basetemp=.pytest_tmp"
+# 说明：缓存与临时目录改用仓库内的 .pytest_tmp，避开 %TEMP%\pytest-of-EDY 与
+# 仓库根 .pytest_cache —— 这两处在某些沙箱会话下会被写入无法读取的权限，
+# 导致 tmp_path 用例集体报错（表现为 100+ 个 error 而非真实测试失败）。
+# 两者都是可再生目录，不影响测试结果。
 # 跳过 ultralytics 在导入期写入的缓存目录告警噪音。
 filterwarnings = [
     "ignore::DeprecationWarning:ultralytics.*",

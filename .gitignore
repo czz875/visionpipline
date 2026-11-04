@@ -4,6 +4,8 @@ __pycache__/
 *.pyo
 *.pyd
 .pytest_cache/
+# pytest 的临时目录（pyproject.toml 里指定为仓库内路径，见那里的说明）
+.pytest_tmp/
 .mypy_cache/
 .ruff_cache/
 *.log
