@@ -81,6 +81,7 @@ stages:
       --merge-distance-y ${parameters.merge_distance_y}
       --max-merge-width ${parameters.max_merge_width}
       --max-merge-height ${parameters.max_merge_height}
+      --max-merge-count ${parameters.max_merge_count}
 
   - name: cleanvisionblurry
     command: >

@@ -28,6 +28,7 @@ parameters:
   merge_distance_y: 200
   max_merge_width: 600
   max_merge_height: 600
+  max_merge_count: 10
   blurry_threshold: 0.185
   high_quality_ratio: 0.3
   split_seed: 42

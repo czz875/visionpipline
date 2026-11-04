@@ -8,16 +8,13 @@
 paths:
   annotated: datasets/01_annotated
 
+# 合并阈值与尺寸上限统一取自 tools/cfg/default.yaml（唯一来源），此处只补
+# merge.py 专有的参数，避免同一个值在两处各写一份而悄悄偏离。
 parameters:
-  merge_distance_x: 100
-  merge_distance_y: 200
-  max_merge_width: 600
-  max_merge_height: 600
   face_label: face
   right_cut_ratio: 0.0
   min_face_width: 100
   min_face_height: 50
-  max_merge_count: 10
   max_workers: 12
 
 stages_only:
