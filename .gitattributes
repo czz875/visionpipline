@@ -1,0 +1,32 @@
+# 行尾策略：统一用 LF 入库，Windows 检出时转 CRLF。
+#
+# 背景：本机 core.autocrlf=true 来自 system 级（Git for Windows 默认），
+# 不随仓库传播；工作树行尾已经混杂（README.md 是 CRLF、tools/core/labelme.py
+# 是 LF）。换机器或换编辑器时容易出现整文件 diff，提交前校验也容易踩坑。
+# 这里把策略写进仓库，让所有检出环境一致。
+
+# 默认：文本文件一律 LF 入库
+* text=auto eol=lf
+
+# Windows 批处理与 PowerShell 脚本必须用 CRLF，否则 cmd.exe 可能解析异常
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# 二进制文件不做行尾转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.pt binary
+*.onnx binary
+*.tar.gz binary
+*.tgz binary
+*.zip binary
+*.7z binary
+
+# 数据集与训练产物目录（被 .gitignore 忽略，这里只声明属性以防误纳）
+datasets/** binary
+weight/** binary
+runs/** binary
