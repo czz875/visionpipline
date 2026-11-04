@@ -22,13 +22,13 @@ from tools.annotate.runners.supervision import parse_class_ids
 
 def test_all_unrecognised_class_names_raise() -> None:
     """名称全部无法识别时必须报错，不能静默返回 None（= 不过滤）。"""
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="未识别的类别"):
         parse_class_ids("fac", ["face", "hand", "helmet"])
 
 
 def test_partially_unrecognised_class_names_raise() -> None:
     """部分无法识别时也要报错：静默忽略会让用户以为过滤生效了。"""
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="未识别的类别"):
         parse_class_ids("face,helmt", ["face", "hand", "helmet"])
 
 

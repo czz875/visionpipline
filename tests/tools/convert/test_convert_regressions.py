@@ -165,7 +165,7 @@ def test_convert_to_yolo_honours_seed_argument(tmp_path: Path) -> None:
 def test_parse_ratios_accepts_config_value_and_rejects_bad_input() -> None:
     """tools/cfg/labelme_to_yolo.yaml 里的 "0.9,0.1" 必须被接受。"""
     assert parse_ratios("0.9,0.1") == [0.9, 0.1]
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="需要 2 个值"):
         parse_ratios("0.9")  # 数量不足
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="之和必须为 1"):
         parse_ratios("0.5,0.6")  # 之和不为 1

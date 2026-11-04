@@ -108,7 +108,7 @@ def test_missing_label_dir_raises_instead_of_writing_empty(tmp_path: Path) -> No
     Image.new("RGB", (100, 80), color="white").save(images / "a.png")
     output = tmp_path / "output"
 
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(FileNotFoundError, match="标签"):
         convert_yolo_to_labelme(
             images, tmp_path / "不存在的标签目录", ["phone"], output
         )
@@ -123,7 +123,7 @@ def test_missing_single_label_file_raises(tmp_path: Path) -> None:
     Image.new("RGB", (100, 80), color="white").save(images / "a.png")
     # labels 目录存在但没有任何 txt
 
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(FileNotFoundError, match="标签"):
         convert_yolo_to_labelme(images, labels, ["phone"], tmp_path / "output")
 
 

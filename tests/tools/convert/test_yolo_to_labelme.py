@@ -35,7 +35,7 @@ def test_parse_classes_rejects_missing_yaml_instead_of_using_path_as_label(
     """路径形似 YAML 但不存在时必须报错，不能把路径本身当成类名。"""
     missing = tmp_path / "not_exist.yaml"
 
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(FileNotFoundError, match="不存在"):
         parse_classes(str(missing))
 
 
@@ -43,7 +43,7 @@ def test_parse_classes_rejects_yaml_without_names(tmp_path: Path) -> None:
     yaml_path = tmp_path / "data.yaml"
     yaml_path.write_text(yaml.safe_dump({"nc": 0}), encoding="utf-8")
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="names"):
         parse_classes(str(yaml_path))
 
 

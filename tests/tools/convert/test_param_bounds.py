@@ -53,7 +53,7 @@ def test_mosaic_block_cli_zero_is_rejected() -> None:
     from tools.annotate.parser import build_parser
 
     parser = build_parser()
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit, match="2"):
         parser.parse_args(["--mosaic-block", "0"])
 
 
@@ -75,7 +75,7 @@ def test_empty_source_dir_is_an_error(tmp_path: Path) -> None:
 
 def test_missing_source_dir_raises(tmp_path: Path) -> None:
     """源目录不存在仍要报错（守护）。"""
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(FileNotFoundError, match="不存在"):
         convert_to_yolo(tmp_path / "nope", tmp_path / "out", class_names=["phone"])
 
 

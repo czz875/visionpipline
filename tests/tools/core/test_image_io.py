@@ -41,7 +41,7 @@ def test_write_image_raises_on_unwritable_path(tmp_path: Path) -> None:
     """写盘失败必须抛错，不能像 cv2.imwrite 那样静默返回 False。"""
     target = tmp_path / "缺失目录" / "图片.png"
 
-    with pytest.raises(OSError):
+    with pytest.raises(OSError, match="图片写盘失败"):
         write_image(target, _sample_image())
 
 
@@ -53,5 +53,5 @@ def test_image_size_reports_width_and_height(tmp_path: Path) -> None:
 
 
 def test_image_size_raises_for_missing_file(tmp_path: Path) -> None:
-    with pytest.raises(OSError):
+    with pytest.raises(OSError, match="无法读取图片"):
         image_size(tmp_path / "不存在.png")

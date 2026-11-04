@@ -61,12 +61,12 @@ def test_substitute_variables_latest_supports_nested_variable(tmp_path):
 
 def test_substitute_variables_latest_no_match_raises():
     """无匹配目录时必须报错，不能把占位符原样交给子进程。"""
-    with pytest.raises(KeyError):
+    with pytest.raises(KeyError, match="无法解析的变量"):
         substitute_variables("--input ${latest:/nonexistent/path/*}", {})
 
 
 def test_substitute_variables_unknown_variable_raises():
-    with pytest.raises(KeyError):
+    with pytest.raises(KeyError, match=r"\$\{paths\.nope\}"):
         substitute_variables("--input ${paths.nope}", {})
 
 
