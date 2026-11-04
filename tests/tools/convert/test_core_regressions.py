@@ -129,6 +129,7 @@ def test_copy_dataset_preserves_hardlinks(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_find_image_for_json_is_stable_across_processes(tmp_path: Path) -> None:
     """同名多格式并存时，不同进程必须选中同一个文件。
 

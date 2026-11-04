@@ -77,6 +77,7 @@ def test_onnx_runs_on_cpu() -> None:
     assert tuple(out.shape) == (3, 2)
 
 
+@pytest.mark.requires_gpu
 def test_onnx_runs_on_gpu_when_available() -> None:
     """有 CUDA 时 ONNX 能在 GPU 上推理；无 GPU 则跳过。"""
     if "CUDAExecutionProvider" not in ort.get_available_providers():

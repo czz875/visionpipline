@@ -64,6 +64,7 @@ def _disk_yolo_classes() -> list[str]:
     return [str(n) for n in names]
 
 
+@pytest.mark.requires_dataset
 @pytest.mark.skipif(
     not YOLO_ROOT.is_dir(), reason="需要真实 datasets/yolo 才能比对"
 )
@@ -75,6 +76,7 @@ def test_default_classes_match_dataset() -> None:
     )
 
 
+@pytest.mark.requires_dataset
 @pytest.mark.skipif(
     not YOLO_ROOT.is_dir(), reason="需要真实 datasets/yolo 才能比对"
 )

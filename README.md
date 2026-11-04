@@ -72,7 +72,6 @@ visionpipline/
 ├── .conda/               # 项目自带的便携式 Python 3.11
 ├── tools/                # 业务脚本（按阶段分组）
 │   ├── core/             #   公共模块：LabelMe 读写 / 几何工具 / 常量
-│   ├── engine/           #   各 stage 聚合入口（re-export）
 │   ├── annotate/         #   自动标注：backends（yolo/sam/detr/onnx）+ 编排 + 框合并
 │   ├── clean/            #   清洗：模糊检测 / 孤儿 JSON
 │   ├── label/            #   标签处理：对齐 / 替换 / 修复 LabelMe JSON

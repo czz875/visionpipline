@@ -21,6 +21,7 @@ def test_torch_version_present() -> None:
     assert getattr(torch, "__version__", "") != ""
 
 
+@pytest.mark.requires_gpu
 def test_cuda_is_available() -> None:
     """CUDA 对 torch 可用。
 
@@ -32,6 +33,7 @@ def test_cuda_is_available() -> None:
     assert torch.cuda.device_count() >= 1
 
 
+@pytest.mark.requires_gpu
 def test_cuda_tensor_computation() -> None:
     """可在 CUDA 上完成一次基本张量运算。"""
     if not torch.cuda.is_available():
