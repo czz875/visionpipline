@@ -74,18 +74,21 @@ def _build_tar(
     dst_tar.parent.mkdir(parents=True, exist_ok=True)
 
     def _track(_tarinfo: tarfile.TarInfo) -> tarfile.TarInfo:
-        if pbar is not None:
+        if pbar is not None and not _tarinfo.isdir():
             pbar.update(1)
         return _tarinfo
 
-    # 先统计文件总数，仅用于 progress 总量；不统计不会影响正确性
-    total = sum(1 for _ in src.rglob("*") if _.is_file())
-    if pbar is not None:
-        pbar.total = (pbar.total or 0) + total
-        pbar.refresh()
-
-    with tarfile.open(dst_tar, "w:gz", compresslevel=level) as tar:
-        tar.add(src, arcname=src.name, filter=_track)
+    # 总数由 snapshot_sources 统一统计，避免每个源目录再完整扫描一次。
+    # 排他创建必须在清理保护范围外，已有文件绝不能因创建失败被删除。
+    archive_file = dst_tar.open("xb")
+    try:
+        with archive_file:
+            with tarfile.open(fileobj=archive_file, mode="w:gz", compresslevel=level) as tar:
+                tar.add(src, arcname=src.name, filter=_track)
+    except BaseException:
+        # 读源失败、磁盘满或用户中断时，不留下可被误认作完整备份的文件。
+        dst_tar.unlink(missing_ok=True)
+        raise
     return dst_tar
 
 
@@ -96,19 +99,30 @@ def snapshot_sources(
     level: int = DEFAULT_LEVEL,
     dry_run: bool = DEFAULT_DRY_RUN,
 ) -> list[tuple[Path, Path]]:
-    """批量打包。返回 ``[(src, dst_tar), ...]`` 计划列表。"""
+    """预检全部源后批量打包，返回 ``[(src, dst_tar), ...]`` 计划列表。
+
+    源缺失、输出位于源内或备份文件名冲突时，在开始打包前报错。
+    """
+    if not sources:
+        raise ValueError("源目录列表不能为空。")
+    if not 0 <= level <= 9:
+        raise ValueError("压缩等级必须在 0 到 9 之间。")
     output_dir = output_dir.resolve()
     now = datetime.now()
     plans: list[tuple[Path, Path]] = []
+    destinations: set[Path] = set()
     for src in sources:
         src = src.resolve()
-        if not src.exists():
-            print(f"[警告] 源目录不存在，跳过：{src}")
-            continue
         if not src.is_dir():
-            print(f"[警告] 源路径不是目录，跳过：{src}")
-            continue
+            raise FileNotFoundError(f"源目录不存在或不是目录：{src}")
+        if output_dir == src or src in output_dir.parents:
+            raise ValueError(f"备份输出不能位于源目录内：{output_dir}、{src}")
         dst = output_dir / _make_tar_name(src, now)
+        if dst in destinations:
+            raise ValueError(f"源目录同名，备份文件名冲突：{dst}")
+        if dst.exists():
+            raise FileExistsError(f"备份文件已存在，禁止覆盖：{dst}")
+        destinations.add(dst)
         plans.append((src, dst))
 
     # 总文件数先预估，用于 progress bar 的总长度
@@ -178,12 +192,13 @@ def main() -> int:
         print("[错误] --sources 不能为空。")
         return 1
 
-    plans = snapshot_sources(
-        sources,
-        args.output_dir,
-        level=args.level,
-        dry_run=args.dry_run,
-    )
+    try:
+        plans = snapshot_sources(
+            sources, args.output_dir, level=args.level, dry_run=args.dry_run,
+        )
+    except (OSError, ValueError) as exc:
+        print(f"[错误] {exc}")
+        return 1
 
     mode = "预览" if args.dry_run else "已生成"
     print(f"[{mode}] 共 {len(plans)} 个备份")
