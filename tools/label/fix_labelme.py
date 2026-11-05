@@ -390,7 +390,7 @@ def main() -> int:
             print(f"      {k:<32} {v}")
     if args.dry_run:
         print("\n（这是 dry-run 预览，加上 --apply 才会真正改盘）")
-    return 0
+    return 1 if report.failed else 0
 
 
 if __name__ == "__main__":

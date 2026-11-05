@@ -114,6 +114,20 @@ JPG 原始数据（可选）──► tools/convert/jpg_to_png.py ──► PNG
   输入缺失、没有图片或输出非空时返回失败，保留已有数据。
 - `backup/snapshot.py` 在写入前校验全部源目录；源缺失、源目录同名、输出位于源内，
   或目标备份文件已存在时返回失败。备份文件不会覆盖旧文件。
+- `clean/blurry.py` 要求输入、裁剪缓存根目录、移出目录互不重叠。每轮在缓存根目录
+  新建独立子目录，`--cleanup-crop` 只删除本轮子目录，保留已有文件；旧裁剪不会参与新一轮判定。
+  递归输入按 JSON 所在目录解析 `imagePath`，检测结果通过完整图片路径定位，避免同名图被连带移走。
+  原图与所有来源 JSON 分别按数据集相对路径移出，保留跨目录引用；输入图片经过符号链接时返回失败，
+  应先将标注对齐到实际图片路径。待移出标注的 `imagePath` 必须相对于 JSON 所在目录，带根或盘符的引用会在
+  移动前报错，避免移出后失效。移出前校验全部目标及其父路径，拒绝已有目标和目录链接；每个目标
+  采用排他创建，跨卷复制失败时清理本次残件，移动失败时尝试回滚已完成的移动。
+  `--workers` 控制裁剪线程，CleanVision 评分
+  使用单进程，避免 Windows 子进程重复加载 SciPy 导致内存耗尽。
+- `rename/timestamp_rename.py` 在规划时预留本轮目标名；开启 `--labelme-sync` 时同时检查并预留
+  同名 JSON，避免已有文件与本轮任务之间冲突。
+- YOLO 导出在写盘前检查标签文件名冲突：同 stem 的不同扩展名、仅大小写不同的图片都会报错，
+  应先重命名或改用 LabelMe 导出。LabelMe 导出会为大小写冲突生成不同名称，保留图片与 JSON 配对。
+- `label/fix_labelme.py` 在预览或执行中遇到无法修复的 JSON 时返回非零，防止工作流把失败当成成功。
 
 ---
 
@@ -368,7 +382,8 @@ D:\PycharmProjects\visionpipline\.conda\python.exe tools\workflow.py --from-stag
 ### 5. clean/blurry 移走了清晰图怎么办？
 
 `tools/clean/blurry.py` 只把被判定为模糊的原图移到 `--output-path`；清晰图仍保留
-在原目录。如果阈值太严格，可调高 `--blurry-threshold`（如 0.25）。
+在原目录。移出条件同时要求 CleanVision 标记为模糊，且分数不大于 `--blurry-threshold`。
+误判过多时可调低该阈值，先用独立样本复核效果。
 
 ### 6. 缺依赖怎么装
 
