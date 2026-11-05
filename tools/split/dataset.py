@@ -22,6 +22,8 @@ from tools.core import (
 )
 
 DEFAULT_OUTPUT_DIR = Path("datasets/split")
+DEFAULT_RATIO = 0.3
+DEFAULT_SEED = 42
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -50,13 +52,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ratio",
         type=float,
-        default=0.3,
+        default=DEFAULT_RATIO,
         help="A 份占总图片数量的比例（默认：%(default)s）。",
     )
     parser.add_argument(
         "--seed",
         type=int,
-        default=42,
+        default=DEFAULT_SEED,
         help="随机种子，保证可复现（默认：%(default)s）。",
     )
     parser.add_argument(
@@ -87,6 +89,33 @@ def _copy_image_json(
         shutil.copy2(json_path, out_dir / json_path.name)
 
 
+def _collect_input_images(input_dir: Path, ratio: float) -> list[Path]:
+    """在创建输出目录前校验输入，图片只扫描一次。"""
+    if not input_dir.is_dir():
+        raise FileNotFoundError(f"输入目录不存在：{input_dir}")
+    if not 0 < ratio < 1:
+        raise ValueError("ratio 必须在 (0, 1) 之间。")
+    images = list_images(input_dir)
+    if not images:
+        raise FileNotFoundError(f"在 {input_dir} 中未找到图片。")
+    return images
+
+
+def _validate_output_paths(input_dir: Path, outputs: tuple[Path, ...]) -> None:
+    """预检全部输出及其父路径，不创建目录、不删除旧数据。"""
+    paths = (input_dir, *outputs)
+    for i, left in enumerate(paths):
+        for right in paths[i + 1:]:
+            if left == right or left in right.parents or right in left.parents:
+                raise ValueError(f"输入与 A/B 输出目录不能重叠：{left}、{right}")
+    for output in outputs:
+        if output.exists() and (not output.is_dir() or any(output.iterdir())):
+            raise ValueError(f"输出路径非空或不是目录，请指定新的目录：{output}")
+        for parent in output.parents:
+            if parent.exists() and not parent.is_dir():
+                raise ValueError(f"输出的父路径不是目录：{parent}")
+
+
 def split_dataset(
     input_dir: Path,
     output_a: Path,
@@ -107,16 +136,32 @@ def split_dataset(
 
     Returns:
         (A 份图片数, B 份图片数)。
+
+    Raises:
+        FileNotFoundError: 输入目录不存在或没有图片。
+        ValueError: 比例非法，或写入目录重叠、非空。
     """
-    images = list_images(input_dir)
-    if not images:
-        print(f"[警告] 在 {input_dir} 中未找到图片。")
-        return 0, 0
+    input_dir = input_dir.resolve()
+    images = _collect_input_images(input_dir, ratio)
+    return _split_images(
+        images, input_dir, output_a.resolve(), output_b.resolve(), ratio, seed, copy,
+    )
+
+
+def _split_images(
+    images: list[Path], input_dir: Path, output_a: Path, output_b: Path,
+    ratio: float, seed: int, copy: bool,
+) -> tuple[int, int]:
+    """对已扫描的图片分组，写入前统一检查输出范围。"""
+    if copy:
+        _validate_output_paths(input_dir, (output_a, output_b))
+        output_a.mkdir(parents=True, exist_ok=True)
+        output_b.mkdir(parents=True, exist_ok=True)
 
     shuffled = images[:]
     random.Random(seed).shuffle(shuffled)
 
-    count_a = max(1, int(len(shuffled) * ratio)) if 0 < ratio < 1 else len(shuffled)
+    count_a = max(1, int(len(shuffled) * ratio))
     selected = set(shuffled[:count_a])
 
     copied_a = copied_b = 0
@@ -139,33 +184,29 @@ def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
 
-    if not (0 < args.ratio < 1):
-        print("[错误] --ratio 必须在 (0, 1) 之间。")
-        return 1
-
-    output_a = args.output_a
-    output_b = args.output_b
-    if output_a is None or output_b is None:
-        base = Path(DEFAULT_OUTPUT_DIR)
-        base.mkdir(parents=True, exist_ok=True)
+    try:
+        input_dir = args.input.resolve()
+        images = _collect_input_images(input_dir, args.ratio)
+        output_a = args.output_a.resolve() if args.output_a is not None else None
+        output_b = args.output_b.resolve() if args.output_b is not None else None
+        if args.copy:
+            provided = tuple(p for p in (output_a, output_b) if p is not None)
+            _validate_output_paths(input_dir, provided)
+            if output_a is None or output_b is None:
+                base = Path(DEFAULT_OUTPUT_DIR).resolve()
+                for root in (input_dir, *provided):
+                    if root == base or root in base.parents:
+                        raise ValueError(f"默认输出目录与输入或另一输出重叠：{base}、{root}")
         if output_a is None:
-            output_a = build_timestamped_output_dir(base, "split_a")
+            output_a = build_timestamped_output_dir(DEFAULT_OUTPUT_DIR, "split_a").resolve()
         if output_b is None:
-            output_b = build_timestamped_output_dir(base, "split_b")
-    else:
-        output_a = Path(output_a)
-        output_b = Path(output_b)
-        output_a.mkdir(parents=True, exist_ok=True)
-        output_b.mkdir(parents=True, exist_ok=True)
-
-    count_a, count_b = split_dataset(
-        args.input.resolve(),
-        output_a.resolve(),
-        output_b.resolve(),
-        args.ratio,
-        args.seed,
-        args.copy,
-    )
+            output_b = build_timestamped_output_dir(DEFAULT_OUTPUT_DIR, "split_b").resolve()
+        count_a, count_b = _split_images(
+            images, input_dir, output_a, output_b, args.ratio, args.seed, args.copy,
+        )
+    except (OSError, ValueError) as exc:
+        print(f"[错误] {exc}")
+        return 1
 
     print(f"A 份：{count_a} 张 -> {output_a}")
     print(f"B 份：{count_b} 张 -> {output_b}")
