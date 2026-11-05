@@ -21,6 +21,7 @@ tools/convert/yolo_to_labelme.py
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
 from pathlib import Path
 
@@ -122,7 +123,7 @@ def _unique_stem(image_path: Path, images_dir: Path, used: set[str]) -> str:
     后写的会覆盖先写的，静默丢标注且计数虚高。冲突时用父目录名做前缀，
     与 ``supervision`` 导出的 ``_unique_stem`` 思路一致。
     """
-    if image_path.stem not in used:
+    if image_path.stem.casefold() not in used:
         return image_path.stem
     try:
         rel_parent = image_path.parent.relative_to(images_dir)
@@ -131,14 +132,14 @@ def _unique_stem(image_path: Path, images_dir: Path, used: set[str]) -> str:
         prefix = image_path.parent.name
     if prefix:
         candidate = f"{prefix}_{image_path.stem}"
-        if candidate not in used:
+        if candidate.casefold() not in used:
             return candidate
         i = 1
-        while f"{candidate}_{i}" in used:
+        while f"{candidate}_{i}".casefold() in used:
             i += 1
         return f"{candidate}_{i}"
     i = 1
-    while f"{image_path.stem}_{i}" in used:
+    while f"{image_path.stem}_{i}".casefold() in used:
         i += 1
     return f"{image_path.stem}_{i}"
 
@@ -149,7 +150,7 @@ def convert_yolo_to_labelme(
     class_names: list[str],
     output_dir: Path,
 ) -> int:
-    """批量转换 YOLO 标注为 LabelMe JSON。
+    """批量转换 YOLO 标注，并复制图片组成可直接打开的 LabelMe 数据集。
 
     标签目录或单张图的标签文件缺失时抛 ``FileNotFoundError``：静默当成空标注
     会写出 shapes=0 的 JSON 并报告成功，下游拿到的是「全部无框」的数据。
@@ -161,8 +162,17 @@ def convert_yolo_to_labelme(
     Returns:
         成功生成的 JSON 数量。
     """
+    images_dir, output_dir = images_dir.resolve(), output_dir.resolve()
+    if (
+        images_dir == output_dir
+        or images_dir in output_dir.parents
+        or output_dir in images_dir.parents
+    ):
+        raise ValueError(f"图片输入与输出目录不能重叠：{images_dir}、{output_dir}")
     if not labels_dir.is_dir():
         raise FileNotFoundError(f"标签目录不存在：{labels_dir}")
+    if output_dir.exists() and (not output_dir.is_dir() or any(output_dir.iterdir())):
+        raise ValueError(f"输出路径非空或不是目录，请指定新的目录：{output_dir}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     images = list_images(images_dir)
@@ -179,10 +189,12 @@ def convert_yolo_to_labelme(
                 f"图片 {image_path.name} 的标签文件不存在：{label_path}"
             )
         stem = _unique_stem(image_path, images_dir, used_stems)
-        used_stems.add(stem)
+        used_stems.add(stem.casefold())
         data = build_labelme_data(image_path, label_path, class_names)
         # imagePath 必须与输出文件名一致，否则 LabelMe 打开后指向另一张图。
         data["imagePath"] = f"{stem}{image_path.suffix}"
+        output_image = output_dir / data["imagePath"]
+        shutil.copy2(image_path, output_image)
         save_labelme(data, output_dir / f"{stem}.json")
         generated += 1
 
