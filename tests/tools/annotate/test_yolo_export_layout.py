@@ -83,3 +83,28 @@ def test_yolo_export_data_yaml_is_loadable(tmp_path: Path) -> None:
     assert "val" in data, "data.yaml 缺 val"
     assert data["nc"] == 2
     assert data["names"] == ["phone", "face"]
+
+
+def test_labelme_export_keeps_case_only_names_as_distinct_pairs(tmp_path: Path) -> None:
+    import supervision as sv
+    from PIL import Image
+
+    paths = []
+    for folder, name, color in [("a", "X.png", "red"), ("b", "x.png", "blue")]:
+        parent = tmp_path / folder
+        parent.mkdir()
+        image = parent / name
+        Image.new("RGB", (20, 20), color=color).save(image)
+        paths.append(str(image))
+    dataset = sv.DetectionDataset(
+        classes=["face"], images=paths, annotations={p: sv.Detections.empty() for p in paths},
+    )
+    output = tmp_path / "output"
+
+    export_detection_dataset(dataset, output, "labelme", copy_images=True)
+
+    jsons = list(output.glob("*.json"))
+    assert len(jsons) == 2
+    image_paths = [output / json.loads(p.read_text(encoding="utf-8"))["imagePath"] for p in jsons]
+    assert len(set(image_paths)) == 2
+    assert {p.read_bytes() for p in image_paths} == {Path(p).read_bytes() for p in paths}

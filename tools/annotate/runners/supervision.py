@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import os
 import shutil
 import sys
 from tqdm import tqdm
@@ -158,16 +159,16 @@ def _unique_stem(path: Path, used: set[str]) -> str:
     例如 ``datasets/15/capture_000000.png`` 与 ``datasets/16/capture_000000.png``
     会分别生成 ``15_capture_000000`` 与 ``16_capture_000000``。
     """
-    if path.stem not in used:
+    if path.stem.casefold() not in used:
         return path.stem
     parts = [path.stem]
     for parent in path.parents:
         candidate = "_".join([parent.name] + parts)
-        if candidate not in used:
+        if candidate.casefold() not in used:
             return candidate
         parts.insert(0, parent.name)
     i = 1
-    while f"{path.stem}_{i}" in used:
+    while f"{path.stem}_{i}".casefold() in used:
         i += 1
     return f"{path.stem}_{i}"
 
@@ -185,7 +186,7 @@ def _export_labelme(dataset, output_dir: Path) -> None:
     for image_path, image, detections in dataset:
         src = Path(image_path)
         stem = _unique_stem(src, used_stems)
-        used_stems.add(stem)
+        used_stems.add(stem.casefold())
         dst = output_dir / f"{stem}{src.suffix}"
         shutil.copy2(str(src), str(dst))
 
@@ -284,21 +285,22 @@ def resolve_supervision_output(logical_output: Path) -> Path:
 def _check_yolo_basename_collisions(dataset) -> None:
     """检测 YOLO 导出会发生的同名覆盖。
 
-    supervision 的 ``as_yolo`` 按图片 basename 命名标签文件，不同子目录的同名
-    图片会互相覆盖、静默丢标注。这里提前检测并报错，让调用方显式处理，而不是
+    supervision 的 ``as_yolo`` 按图片 stem 命名标签文件，同 stem 的不同扩展名
+    或仅大小写不同的图片都会共享同一标签文件。这里提前检测并报错，而不是
     拿到一份少了标注的数据集却看到「成功」。
 
     Raises:
         ValueError: 存在同名图片。
     """
-    seen: dict[str, str] = {}
+    seen: dict[str, Path] = {}
     collisions: list[str] = []
     for image_path in dataset.image_paths:
-        path = Path(image_path)
-        name = path.name
-        if name in seen and seen[name] != str(path):
+        # 与 supervision 实际写盘时的词法文件名保持一致，不用符号链接目标名替代。
+        path = Path(os.path.abspath(image_path))
+        name = path.stem.casefold()
+        if name in seen and seen[name] != path:
             collisions.append(f"{seen[name]} 与 {path}")
-        seen.setdefault(name, str(path))
+        seen.setdefault(name, path)
     if collisions:
         sample = "\n    ".join(collisions[:5])
         more = f"\n    ... 另有 {len(collisions) - 5} 组" if len(collisions) > 5 else ""
@@ -318,10 +320,11 @@ def export_detection_dataset(
     会先把图片复制到输出目录并赋予唯一 basename，再写出 JSON。
     其他格式仍按 ``images/`` 与标注目录分开的常规布局写出。
     """
+    if fmt == "yolo":
+        _check_yolo_basename_collisions(dataset)
     output.mkdir(parents=True, exist_ok=True)
     images_dir = output / "images"
     if fmt == "yolo":
-        _check_yolo_basename_collisions(dataset)
         if copy_images:
             images_dir.mkdir(parents=True, exist_ok=True)
         labels_dir = output / "labels"
