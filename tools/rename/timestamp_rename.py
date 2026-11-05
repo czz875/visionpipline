@@ -104,11 +104,19 @@ def _collect_files(
     return files
 
 
+def _target_is_taken(target: Path, reserved: set[Path], labelme_sync: bool) -> bool:
+    """同时检查磁盘已有路径及本轮预留的图片、JSON 目标。"""
+    targets = (target, target.with_suffix(".json")) if labelme_sync else (target,)
+    return any(path in reserved or path.exists() or path.is_symlink() for path in targets)
+
+
 def _resolve_collision(
     target_dir: Path,
     stem: str,
     suffix: str,
     *,
+    reserved: set[Path],
+    labelme_sync: bool,
     seq_width: int = DEFAULT_SEQ_WIDTH,
 ) -> Path:
     """找一个不会撞名的目标路径，序号递增。
@@ -120,7 +128,7 @@ def _resolve_collision(
     seq = int(stem[-seq_width:]) + 1
     while True:
         candidate = target_dir / f"{base_stem}_{seq:0{seq_width}d}{suffix}"
-        if not candidate.exists():
+        if not _target_is_taken(candidate, reserved, labelme_sync):
             return candidate
         seq += 1
 
@@ -233,6 +241,7 @@ def rename_by_timestamp(
     image_files.sort(key=lambda p: getattr(p.stat(), attr))
 
     plans: list[tuple[Path, Path]] = []
+    reserved: set[Path] = set()
     for seq, src in enumerate(tqdm(image_files, desc="规划改名", unit="file", leave=False), start=1):
         ts = getattr(src.stat(), attr)
         stem = _timestamp_to_str(ts)
@@ -241,9 +250,15 @@ def rename_by_timestamp(
         target = src.parent / f"{full_stem}{suffix}"
         if target == src:
             continue
-        if target.exists():
-            target = _resolve_collision(src.parent, full_stem, suffix, seq_width=seq_width)
+        if _target_is_taken(target, reserved, labelme_sync):
+            target = _resolve_collision(
+                src.parent, full_stem, suffix, reserved=reserved,
+                labelme_sync=labelme_sync, seq_width=seq_width,
+            )
         plans.append((src, target))
+        reserved.add(target)
+        if labelme_sync:
+            reserved.add(target.with_suffix(".json"))
 
     if dry_run:
         return plans, []
