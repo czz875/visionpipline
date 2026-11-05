@@ -104,6 +104,17 @@ JPG 原始数据（可选）──► tools/convert/jpg_to_png.py ──► PNG
 | 打包 | [tools/train/create_tar_gz.py](tools/train/create_tar_gz.py) | 把归档目录压缩为 .tar.gz，方便交付 |
 | 公共模块 | [tools/core/](tools/core/) | 常量、LabelMe 读写、几何工具等 |
 
+数据处理的写入约定：
+
+- `yolo_to_labelme.py` 会将图片复制到输出目录，与生成的同名 JSON 配对；
+  JSON 的 `imagePath` 指向输出图片，后续孤儿 JSON 清洗不会误删有效标注。
+  输出目录必须为空，且不能与图片输入目录重叠，避免平铺复制覆盖已有图片或硬链接内容。
+- `split/dataset.py` 只向空目录写入；输入与 A/B 输出目录必须互不重叠。
+  重跑时指定新的输出目录，或省略 `--output-a` / `--output-b` 自动创建时间戳目录。
+  输入缺失、没有图片或输出非空时返回失败，保留已有数据。
+- `backup/snapshot.py` 在写入前校验全部源目录；源缺失、源目录同名、输出位于源内，
+  或目标备份文件已存在时返回失败。备份文件不会覆盖旧文件。
+
 ---
 
 ## 自动标注：多后端 / ONNX 打码覆盖 / 多检测器组合
@@ -243,23 +254,31 @@ JPG 原始数据（可选）──► tools/convert/jpg_to_png.py ──► PNG
 
 ### stage 输出路径传递
 
-stage 可声明 `output_var`，工作流会自动捕获其 stdout 中的 `OUTPUT_PATH:` 行：
+stage 可声明 `output_var`，工作流会自动捕获其 stdout 中的 `OUTPUT_PATH:` 行。
+普通变量名写入 `${prev.<变量名>}`；以 `paths.` 开头则直接更新后续阶段使用的路径。
+主工作流的自动标注采用后者，确保合并与清洗读取本轮实际批次：
 
 ```yaml
 stages:
   - name: auto_annotate
-    output_var: annotated_dir
+    output_var: paths.annotated
     command: >
       python tools/annotate/auto.py
-      --source ${paths.raw_data}
-      --output ${paths.annotated}
+      --source "${paths.raw_data}"
+      --output "${paths.annotated}"
       --format labelme
+      --apply
 
   - name: merge_boxes
     command: >
       python tools/annotate/merge.py
-      --json-dir ${prev.annotated_dir}
+      --json-dir "${paths.annotated}"
 ```
+
+使用 `--from-stage` 跳过自动标注、从后续阶段恢复时，工作流会将被跳过阶段的
+`paths.*` 输出绑定恢复到该阶段最近一个已有批次。需要处理指定批次时，将对应
+路径明确设为 `datasets/batch_时间戳/阶段目录`；这类显式批次路径不会改选其它批次。
+仅运行单模块配置时，应在配置中提供该模块的实际输入目录。
 
 ### 脚本输出约定
 

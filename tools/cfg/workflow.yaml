@@ -65,18 +65,19 @@ stages:
 
   # ---------- 第一段：数据准备（到人工清洗前停止） ----------
   - name: auto_annotate
+    output_var: paths.annotated
     command: >
       python tools/annotate/auto.py
       --model-type yolo
-      --source ${paths.raw_data}
-      --output ${paths.annotated}
+      --source "${paths.raw_data}"
+      --output "${paths.annotated}"
       --format labelme
       --apply
 
   - name: merge_boxes
     command: >
       python tools/annotate/merge.py
-      --json-dir ${paths.annotated}
+      --json-dir "${paths.annotated}"
       --merge-distance-x ${parameters.merge_distance_x}
       --merge-distance-y ${parameters.merge_distance_y}
       --max-merge-width ${parameters.max_merge_width}
@@ -86,8 +87,8 @@ stages:
   - name: cleanvisionblurry
     command: >
       python tools/clean/blurry.py
-      --dataset-path ${paths.annotated}
-      --output-path ${paths.blurry_output}
+      --dataset-path "${paths.annotated}"
+      --output-path "${paths.blurry_output}"
       --blurry-threshold ${parameters.blurry_threshold}
       --recursive
       --cleanup-crop
@@ -95,14 +96,14 @@ stages:
   - name: clean_orphan
     command: >
       python tools/clean/orphan_json.py
-      --dataset-path ${paths.annotated}
+      --dataset-path "${paths.annotated}"
       --recursive
       --apply
 
   - name: remove_missing
     command: >
       python tools/clean/orphan_images.py
-      --dataset-path ${paths.annotated}
+      --dataset-path "${paths.annotated}"
       --recursive
       --apply
 

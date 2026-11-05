@@ -44,6 +44,7 @@ from tools.cfg import (
     resolve_config,
     substitute_variables,
 )
+from tools.core.output_dir import resolve_latest_batch_stage_dir
 
 
 # =============================================================================
@@ -110,7 +111,9 @@ DEFAULT_LOG_FILE = DEFAULT_LOG                    # workflow.log（在 tools/cfg
 # =============================================================================
 
 _OUTPUT_PATH_RE = re.compile(r"^OUTPUT_PATH:(.+)$", re.MULTILINE)
-_OUTPUT_ARG_RE = re.compile(r"--output(?:-dir|-a|-b)?\s+(\S+)")
+_OUTPUT_ARG_RE = re.compile(
+    r"--output(?:-dir|-a|-b)?(?:\s+|=)(?:\"([^\"]+)\"|'([^']+)'|(\S+))"
+)
 
 
 def _extract_output_path(stdout_text: str, command: str) -> str | None:
@@ -120,8 +123,22 @@ def _extract_output_path(stdout_text: str, command: str) -> str | None:
         return m.group(1).strip()
     m = _OUTPUT_ARG_RE.search(command)
     if m:
-        return m.group(1)
+        return next(value for value in m.groups() if value is not None)
     return None
+
+
+def _set_output_path(key: str, output_path: str, mapping: dict[str, str]) -> None:
+    """更新输出变量；原为相对路径的 paths.* 尽量保留相对项目根的语义。"""
+    previous = mapping.get(key)
+    path = Path(output_path)
+    if (
+        key.startswith("paths.") and previous is not None
+        and not Path(previous).is_absolute() and path.is_absolute()
+        and path.is_relative_to(PROJECT_ROOT)
+    ):
+        output_path = str(path.relative_to(PROJECT_ROOT))
+    mapping[key] = output_path
+    print(f"    [变量] {key} = {output_path}")
 
 
 def _capture_output_var(
@@ -130,15 +147,15 @@ def _capture_output_var(
     command: str,
     mapping: dict[str, str],
 ) -> None:
-    """若 stage 声明了 output_var，从 stdout 或 command 的 --output 提取路径并写入 mapping。"""
+    """捕获阶段输出；普通变量写入 prev，paths.* 直接更新后续阶段的路径。"""
     output_var = stage.get("output_var", "")
     if not output_var:
         return
     name = stage.get("name", "unnamed")
     output_path = _extract_output_path(stdout_text, command)
     if output_path:
-        mapping[f"prev.{output_var}"] = output_path
-        print(f"    [变量] prev.{output_var} = {output_path}")
+        key = output_var if output_var.startswith("paths.") else f"prev.{output_var}"
+        _set_output_path(key, output_path, mapping)
     else:
         print(
             f"    [警告] 阶段 {name} 声明了 output_var={output_var}，"
@@ -442,6 +459,17 @@ def run(
             if from_stage in names:
                 started = True
             else:
+                # 恢复运行时标注生产阶段已被跳过，沿用它最近一个已有输出批次。
+                # 正常执行则以子进程返回的 OUTPUT_PATH 为准，不猜测最新目录。
+                for stage in group:
+                    if not stage.get("enabled", True) or not stage.get("command"):
+                        continue
+                    key = stage.get("output_var", "")
+                    if key and key.startswith("paths.") and key in mapping:
+                        logical_path = Path(mapping[key])
+                        if not logical_path.is_absolute():
+                            logical_path = PROJECT_ROOT / logical_path
+                        _set_output_path(key, str(resolve_latest_batch_stage_dir(logical_path)), mapping)
                 print(f"[跳过] 同序组：{', '.join(names)}")
                 continue
 
