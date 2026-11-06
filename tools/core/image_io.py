@@ -16,6 +16,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from tools.core.file_io import atomic_write_bytes
+
 
 def read_image(image_path: Path | str, flags: int = cv2.IMREAD_COLOR) -> np.ndarray | None:
     """按字节读取图片，兼容中文路径。
@@ -41,7 +43,7 @@ def write_image(
     image: np.ndarray,
     params: list[int] | None = None,
 ) -> None:
-    """按字节写出图片，兼容中文路径。
+    """原子写出图片，兼容中文路径，并隔离其他硬链接。
 
     编码或写盘失败时抛 ``OSError``。此处必须检查返回值：``cv2.imwrite`` 在中文
     路径下只返回 ``False`` 而不抛异常，会造成「图片没写出但 JSON 已写出」。
@@ -61,7 +63,7 @@ def write_image(
     if not success:
         raise OSError(f"图片编码失败：{image_path}")
     try:
-        encoded.tofile(str(image_path))
+        atomic_write_bytes(image_path, memoryview(encoded))
     except OSError as e:
         raise OSError(f"图片写盘失败：{image_path}（{e}）") from e
 

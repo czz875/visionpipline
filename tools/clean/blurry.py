@@ -22,6 +22,8 @@ if __name__ == "__main__" and __package__ in (None, ""):
 from cleanvision import Imagelab
 from PIL import Image
 
+from tools.core.file_io import move_file_without_overwrite as _move_file_without_overwrite
+
 from tools.core import (
     DEFAULT_DATASET_PATH,
     YOLO_CLASS_NAMES,
@@ -201,34 +203,6 @@ def _find_blurry_originals(
         bad_images.add(original)
 
     return bad_images
-
-
-def _move_file_without_overwrite(source: Path, target: Path) -> None:
-    """独占创建目标再移除源；跨卷复制失败时清理本次创建的目标。
-
-    同卷优先使用硬链接保留文件内容及元数据；不支持硬链接时采用排他复制。
-    """
-    try:
-        os.link(source, target)
-    except FileExistsError:
-        raise
-    except OSError:
-        with source.open("rb") as source_file:
-            # 创建失败时不能进入清理分支，以免删除其他任务已经创建的文件。
-            target_file = target.open("xb")
-            try:
-                with target_file:
-                    shutil.copyfileobj(source_file, target_file)
-                shutil.copystat(source, target)
-            except BaseException:
-                target.unlink(missing_ok=True)
-                raise
-    try:
-        source.unlink()
-    except OSError:
-        if source.exists():
-            target.unlink(missing_ok=True)
-        raise
 
 
 def _move_bad_images(

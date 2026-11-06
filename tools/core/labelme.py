@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Iterable
 import numpy as np
 
 from tools.core.constants import IMAGE_EXTENSIONS, LABELME_EXT
+from tools.core.file_io import atomic_write_bytes
 
 if TYPE_CHECKING:
     import supervision as sv
@@ -87,17 +88,15 @@ def save_labelme(
     *,
     indent: int = 2,
 ) -> None:
-    """写出 LabelMe JSON 文件。
+    """原子写出 LabelMe JSON，失败时保留旧文件，且不修改其他硬链接。
 
     Args:
         data: 待写出的字典。
         json_path: 目标 JSON 文件路径。
         indent: JSON 缩进空格数。
     """
-    json_path.write_text(
-        json.dumps(data, ensure_ascii=False, indent=indent),
-        encoding="utf-8",
-    )
+    content = json.dumps(data, ensure_ascii=False, indent=indent).encode("utf-8")
+    atomic_write_bytes(json_path, content)
 
 
 # ---------------------------------------------------------------------------

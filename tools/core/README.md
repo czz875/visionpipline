@@ -20,6 +20,7 @@
 | `constants.py` | 共享常量 | `DEFAULT_DATASET_PATH`、`IMAGE_EXTENSIONS`、`LABELME_EXT`、`BATCH_DIR_RE`、`YOLO_CLASS_NAMES`、`CLASS_PRIORITY` |
 | `images.py` | 图片文件扫描 | `list_images(folder, extensions=..., recursive=...)` |
 | `image_io.py` | 中文路径安全的图片读写 | `read_image`、`write_image`、`image_size` |
+| `file_io.py` | 原子写盘与不覆盖目标的移动 | `atomic_write_bytes`、`move_file_without_overwrite`、`remove_owned_file` |
 | `labelme.py` | LabelMe JSON 扫描与读写 | `list_labelme_files`、`load_labelme`、`save_labelme`、`find_image_for_json`、`find_json_for_image` |
 | `geometry.py` | 边界框几何工具 | `rect_to_xyxy`、`xyxy_to_points`、`get_boxes_dist`、`merge_near_boxes` |
 | `output_dir.py` | 输出目录协议 | `build_timestamped_output_dir`、`build_batch_stage_dir`、`resolve_latest_batch_stage_dir` |
@@ -74,6 +75,14 @@ data = load_labelme(json_path)
 
 save_labelme(data, json_path)
 ```
+
+`save_labelme` 和 `write_image` 会先写入目标同目录的临时文件，再原子替换指定路径。
+发布失败时保留原文件并清理本次临时文件；目标与其他文件互为硬链接时，其他链接的内容保持不变。
+符号链接仍指向原目标，写入会在实际目标处原子替换；POSIX 已有文件权限保留，新文件遵循正常 umask。
+父目录由调用方准备。`move_file_without_overwrite` 用于新文件发布，目标已存在时直接失败；
+不支持硬链接或跨卷时采用排他复制，并在复制失败时清理本次创建的目标。
+它返回发布文件的设备号和 inode，`remove_owned_file` 在清理前按该标识复核，保留已识别的替换文件。
+身份复核与删除不是跨进程事务，调用方应避免其他程序同时覆盖同一路径。
 
 ### 3. 图片与 JSON 互找
 
