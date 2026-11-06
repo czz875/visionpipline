@@ -1,4 +1,4 @@
-"""
+r"""
 tools/convert/jpg_to_png.py
 把 JPG 批量转换为 PNG，同时修复同名 LabelMe JSON 标注。
 
@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import threading
@@ -29,6 +30,7 @@ if __name__ == "__main__" and __package__ in (None, ""):
 from tools.core import build_timestamped_output_dir  # noqa: E402
 from tools.core.image_io import read_image, write_image  # noqa: E402
 from tools.core.labelme import load_labelme, save_labelme  # noqa: E402
+from tools.core.file_io import move_file_without_overwrite, remove_owned_file  # noqa: E402
 
 # =============================================================================
 # 1. 默认参数
@@ -147,55 +149,76 @@ def process_single_file(
     counter_lock: threading.Lock,
     counters: dict,
 ) -> bool:
-    """处理单个 JPG：转 PNG + 修复同名 JSON。"""
+    """在独立临时目录完成图片与标注，再排他发布；只统计完整成功的样本。"""
     img = read_image(jpg_path, cv2.IMREAD_UNCHANGED)
     if img is None:
         with print_lock:
             print("读取失败:", jpg_path)
         return False
 
-    png_path.parent.mkdir(parents=True, exist_ok=True)
+    published: list[tuple[Path, tuple[int, int]]] = []
     try:
-        write_image(
-            png_path, img, [cv2.IMWRITE_PNG_COMPRESSION, png_compression]
-        )
-    except OSError as e:
+        input_json = jpg_path.with_suffix(".json")
+        output_json = png_path.with_suffix(".json")
+        normalized = None
+        if input_json.exists() or input_json.is_symlink():
+            data = load_labelme(input_json)
+            if not isinstance(data, dict):
+                raise ValueError(f"JSON 顶层必须是对象：{input_json}")
+            normalized = normalize_labelme_data(data, new_image_path=png_path.name)
+            normalized["imageHeight"], normalized["imageWidth"] = img.shape[:2]
+
+        for target in (png_path, output_json):
+            if target.exists() or target.is_symlink():
+                raise FileExistsError(f"目标已存在，禁止覆盖：{target}")
+        png_path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=".jpg_to_png_", dir=png_path.parent.resolve()) as directory:
+            staging = Path(directory)
+            staged_image = staging / png_path.name
+            write_image(staged_image, img, [cv2.IMWRITE_PNG_COMPRESSION, png_compression])
+            if normalized is not None:
+                save_labelme(normalized, staged_image.with_suffix(".json"))
+            identity = move_file_without_overwrite(staged_image, png_path)
+            published.append((png_path, identity))
+            if normalized is not None:
+                identity = move_file_without_overwrite(staged_image.with_suffix(".json"), output_json)
+                published.append((output_json, identity))
+    except (OSError, ValueError, TypeError) as e:
+        for target, identity in reversed(published):
+            remove_owned_file(target, identity)
         with print_lock:
-            print(f"保存失败: {png_path}（{e}）")
+            print(f"转换失败: {jpg_path}（{e}）")
         return False
 
     with print_lock:
         print("转换成功:", jpg_path, "->", png_path)
     with counter_lock:
         counters["image"] += 1
-
-    # 处理同名 JSON 标注
-    base_name = jpg_path.stem
-    input_json = jpg_path.with_suffix(".json")
-    output_json = png_path.with_suffix(".json")
-    if input_json.exists():
-        try:
-            data = load_labelme(input_json)
-            if isinstance(data, dict):
-                normalized = normalize_labelme_data(data, new_image_path=png_path.name)
-                save_labelme(normalized, output_json)
-                with print_lock:
-                    print("修复JSON:", input_json, "->", output_json)
-                with counter_lock:
-                    counters["json"] += 1
-            else:
-                with print_lock:
-                    print("JSON顶层不是对象，跳过:", input_json)
-        except Exception as e:
-            with print_lock:
-                print(f"修复JSON失败 {input_json}: {e}")
-
+        counters["json"] += int(normalized is not None)
     return True
 
 
 # =============================================================================
 # 4. 主流程
 # =============================================================================
+
+
+def _validate_input_parameters(input_dir: Path, num_threads: int, png_compression: int) -> None:
+    """校验输入和参数，不创建输出。"""
+    if not input_dir.is_dir():
+        raise FileNotFoundError(f"输入目录不存在或不是目录：{input_dir}")
+    if num_threads < 1:
+        raise ValueError("线程数必须大于 0。")
+    if not 0 <= png_compression <= 9:
+        raise ValueError("PNG 压缩等级必须在 0 到 9 之间。")
+
+
+def _validate_output_path(output_dir: Path) -> Path:
+    """在解析符号链接前检查用户提供的完整输出路径。"""
+    output_dir = Path(os.path.abspath(output_dir))
+    if output_dir.resolve() != output_dir:
+        raise ValueError(f"输出路径经过目录链接：{output_dir}")
+    return output_dir
 
 
 def convert_jpg_to_png(
@@ -206,19 +229,43 @@ def convert_jpg_to_png(
     png_compression: int = DEFAULT_PNG_COMPRESSION,
     recursive: bool = DEFAULT_RECURSIVE,
 ) -> tuple[int, int]:
-    """批量把 JPG 转为 PNG，并修复同名 JSON。返回 (image_count, json_count)。"""
-    if not input_dir.exists():
-        print("输入目录不存在:", input_dir)
-        return 0, 0
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-
+    """批量转换并返回完整成功的图片、JSON 数；预检或任一样本失败时抛异常。"""
+    input_dir, output_dir = input_dir.resolve(), _validate_output_path(output_dir)
+    _validate_input_parameters(input_dir, num_threads, png_compression)
+    if input_dir == output_dir or input_dir in output_dir.parents or output_dir in input_dir.parents:
+        raise ValueError("输入与输出目录不能重叠。")
     tasks = _collect_tasks(input_dir, output_dir, recursive)
+    if not tasks:
+        raise FileNotFoundError(f"未找到 JPG/JPEG 图片：{input_dir}")
+    destinations: set[str] = set()
+    planned_files: set[str] = set()
+    planned_directories: set[str] = set()
+    for jpg_path, png_path in tasks:
+        key = str(png_path).casefold()
+        if key in destinations:
+            raise ValueError(f"转换目标冲突，多个 JPG/JPEG 对应同一 PNG：{png_path}")
+        destinations.add(key)
+        for target in (png_path, png_path.with_suffix(".json")):
+            planned_files.add(str(target).casefold())
+            if target.exists() or target.is_symlink():
+                raise FileExistsError(f"目标已存在，禁止覆盖：{target}")
+            if target.resolve() != target:
+                raise ValueError(f"输出路径经过目录链接：{target}")
+            for parent in target.parents:
+                planned_directories.add(str(parent).casefold())
+                if parent.exists() and not parent.is_dir():
+                    raise ValueError(f"输出的父路径不是目录：{parent}")
+                if parent == output_dir:
+                    break
+    if planned_files & planned_directories:
+        raise ValueError("转换目标冲突：同一路径同时被规划为文件和目录。")
+    output_dir.mkdir(parents=True, exist_ok=True)
     print(f"共发现 {len(tasks)} 个JPG文件，使用 {num_threads} 个线程处理...\n")
 
     print_lock = threading.Lock()
     counter_lock = threading.Lock()
     counters = {"image": 0, "json": 0}
+    failures: list[Path] = []
 
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
         futures = {
@@ -236,13 +283,17 @@ def convert_jpg_to_png(
         for future in as_completed(futures):
             jpg_path = futures[future]
             try:
-                future.result()
+                if not future.result():
+                    failures.append(jpg_path)
             except Exception as e:
+                failures.append(jpg_path)
                 with print_lock:
                     print(f"处理异常 {jpg_path}: {e}")
 
     print("\n总共转换:", counters["image"], "张图片")
     print("总共修复:", counters["json"], "个JSON")
+    if failures:
+        raise RuntimeError(f"{len(failures)} 个样本转换失败；完整成功 {counters['image']} 张图片、{counters['json']} 个 JSON。")
     return counters["image"], counters["json"]
 
 
@@ -277,7 +328,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--png-compression",
         type=int,
         default=DEFAULT_PNG_COMPRESSION,
-        help="PNG 压缩等级 0-9（默认 9，最小体积）。",
+        help=f"PNG 压缩等级 0-9（默认 {DEFAULT_PNG_COMPRESSION}，最小体积）。",
     )
     parser.add_argument(
         "--recursive",
@@ -293,19 +344,20 @@ def main() -> int:
     args = parser.parse_args()
 
     output_dir = args.output
-    if output_dir is None:
-        output_dir = build_timestamped_output_dir(DEFAULT_OUTPUT_DIR, "jpg_to_png")
-    else:
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-    convert_jpg_to_png(
-        input_dir=args.input,
-        output_dir=output_dir,
-        num_threads=args.num_threads,
-        png_compression=args.png_compression,
-        recursive=args.recursive,
-    )
+    try:
+        _validate_input_parameters(args.input, args.num_threads, args.png_compression)
+        if output_dir is None:
+            output_base = _validate_output_path(DEFAULT_OUTPUT_DIR)
+            output_dir = build_timestamped_output_dir(output_base, "jpg_to_png")
+        convert_jpg_to_png(
+            input_dir=args.input, output_dir=output_dir, num_threads=args.num_threads,
+            png_compression=args.png_compression, recursive=args.recursive,
+        )
+    except (OSError, ValueError, RuntimeError) as exc:
+        print(f"[错误] {exc}", file=sys.stderr)
+        if args.output is None and output_dir is not None and output_dir.is_dir() and not any(output_dir.iterdir()):
+            output_dir.rmdir()
+        return 1
     print(f"OUTPUT_PATH:{output_dir.resolve()}")
     return 0
 
