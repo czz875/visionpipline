@@ -37,9 +37,11 @@ def build_timestamped_output_dir(base_dir: Path | str, prefix: str) -> Path:
     name = f"{prefix}_{timestamp}"
     candidate = base / name
 
-    if not candidate.exists():
-        candidate.mkdir(parents=True, exist_ok=True)
+    try:
+        candidate.mkdir()
         return candidate
+    except FileExistsError:
+        pass
 
     # 解决秒级冲突：找最大序号并 +1
     max_seq = 0
@@ -51,9 +53,14 @@ def build_timestamped_output_dir(base_dir: Path | str, prefix: str) -> Path:
             seq = int(m.group(3)) if m.group(3) else 0
             max_seq = max(max_seq, seq)
 
-    candidate = base / f"{name}_{max_seq + 1:03d}"
-    candidate.mkdir(parents=True, exist_ok=True)
-    return candidate
+    sequence = max_seq + 1
+    while True:
+        candidate = base / f"{name}_{sequence:03d}"
+        try:
+            candidate.mkdir()
+            return candidate
+        except FileExistsError:
+            sequence += 1
 
 
 def build_batch_stage_dir(logical_stage_dir: Path | str) -> Path:

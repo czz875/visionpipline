@@ -104,3 +104,32 @@ def test_full_batch_path_chain_uses_single_batch_root(tmp_path):
         "02_encrypted",
         "03_grouped",
     ]
+
+
+def test_same_second_concurrent_creations_never_share_a_directory(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import datetime
+    from threading import Barrier
+    import tools.core.output_dir as output_dirs
+
+    base = tmp_path / "out"
+    base.mkdir()
+    barrier = Barrier(2)
+    real_mkdir = Path.mkdir
+
+    class FixedDatetime:
+        @staticmethod
+        def now():
+            return datetime(2026, 11, 6, 12, 0, 0)
+
+    def synchronized_mkdir(path, *args, **kwargs):
+        if path == base / "jpg_to_png_20261106_120000":
+            barrier.wait(timeout=5)
+        return real_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(output_dirs, "datetime", FixedDatetime)
+    monkeypatch.setattr(Path, "mkdir", synchronized_mkdir)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _: build_timestamped_output_dir(base, "jpg_to_png"), range(2)))
+    assert len(set(results)) == 2
+    assert all(path.is_dir() for path in results)
